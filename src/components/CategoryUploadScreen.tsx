@@ -67,32 +67,54 @@ export const CategoryUploadScreen: React.FC<CategoryUploadScreenProps> = ({
 
     const datasetName = `${categoryName.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}`;
     const formData = new FormData();
+    formData.append('project_id', projectId);
+    formData.append('category_id', categoryId);
     formData.append('dataset_name', datasetName);
     selectedFiles.forEach(f => formData.append('files', f));
 
-    setUploadState({ status: 'uploading', progress: 10 });
+    setUploadState({ status: 'uploading', progress: 5 });
 
     try {
-      // Upload files
-      const uploadUrl = `${API_BASE}/api/v2/projects/${projectId}/datasets/${categoryId}/upload`;
-      const uploadRes = await fetch(uploadUrl, {
-        method: 'POST',
-        body: formData,
+      // Real file upload with XMLHttpRequest for actual byte progress
+      const uploadData: any = await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', `${API_BASE}/api/v2/datasets/upload`);
+
+        xhr.upload.onprogress = (event) => {
+          if (event.lengthComputable) {
+            const percentComplete = Math.min(95, Math.round((event.loaded / event.total) * 100));
+            setUploadState(prev => ({ ...prev, progress: percentComplete }));
+          }
+        };
+
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              resolve(JSON.parse(xhr.responseText));
+            } catch (e) {
+              reject(new Error('Invalid response from server'));
+            }
+          } else {
+            try {
+              const err = JSON.parse(xhr.responseText);
+              reject(new Error(err.detail || `Upload failed with status ${xhr.status}`));
+            } catch {
+              reject(new Error(`Upload failed with status ${xhr.status}`));
+            }
+          }
+        };
+
+        xhr.onerror = () => reject(new Error('Network error during file upload'));
+        xhr.send(formData);
       });
 
-      if (!uploadRes.ok) {
-        const err = await uploadRes.json().catch(() => ({ detail: uploadRes.statusText }));
-        throw new Error(err.detail || 'Upload failed');
-      }
-
-      const uploadData = await uploadRes.json();
       setUploadState({
         status: 'validating',
-        progress: 60,
+        progress: 96,
         datasetId: uploadData.dataset_id,
         datasetName: uploadData.dataset_name,
-        filesUploaded: uploadData.files_saved,
-        totalBytes: uploadData.total_bytes,
+        filesUploaded: uploadData.files_saved || uploadData.files?.length || 1,
+        totalBytes: uploadData.total_bytes || uploadData.size || 0,
         rejected: uploadData.rejected || [],
       });
 

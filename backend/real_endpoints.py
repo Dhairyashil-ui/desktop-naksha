@@ -26,6 +26,8 @@ try:
         get_dataset_files,
         list_project_datasets,
         CATEGORY_EXTENSIONS,
+        normalize_category,
+        CATEGORY_NAMES,
     )
     from backend.file_validator import validate_dataset_by_id
     from backend.operation_logger import operation_logger, LogLevel
@@ -37,6 +39,8 @@ except ImportError:
         get_dataset_files,
         list_project_datasets,
         CATEGORY_EXTENSIONS,
+        normalize_category,
+        CATEGORY_NAMES,
     )
     from file_validator import validate_dataset_by_id
     from operation_logger import operation_logger, LogLevel
@@ -231,55 +235,86 @@ async def get_project_detail(project_id: str):
 # FILE UPLOAD
 # ─────────────────────────────────────────────────────────────────
 
+@router.post("/datasets/upload")
+async def upload_datasets(
+    project_id: str = Form(...),
+    category_id: Optional[str] = Form(None),
+    category: Optional[str] = Form(None),
+    dataset_name: Optional[str] = Form(None),
+    dataset_id: Optional[str] = Form(None),
+    files: List[UploadFile] = File(default=[]),
+    file: Optional[UploadFile] = File(default=None),
+):
+    """
+    REAL multipart file upload endpoint: POST /api/v2/datasets/upload.
+    Handles:
+    - Multiple files and large files
+    - File size validation & streaming
+    - Filename sanitization
+    - Extension validation
+    - MIME/content signature validation (magic bytes)
+    - SHA-256 hash calculation
+    - Duplicate detection in dataset_files
+    - Project ID validation
+    - Category normalization across all 10 categories
+    - Physical storage persistence (storage_cache/)
+    - PostgreSQL dataset_files and input_datasets records
+    - Returns file_id, dataset_id, filename, size, SHA256, category, storage location, upload status
+    """
+    cat_key = category_id or category
+    if not cat_key:
+        raise HTTPException(status_code=400, detail="Missing category_id or category field")
+
+    file_list = list(files) if files else []
+    if file is not None and file not in file_list:
+        file_list.append(file)
+
+    if not file_list:
+        raise HTTPException(status_code=400, detail="No files provided for upload")
+
+    cat_enum = normalize_category(cat_key)
+    cat_label = cat_enum.replace("CAT_", "").split("_")[0]
+
+    await operation_logger.log(
+        category=cat_label,
+        message=f"Upload initiated: {len(file_list)} file(s) for project {project_id[:8]}",
+        detail=f"Category: {cat_enum}, Target Dataset: {dataset_name or 'Auto-generated'}"
+    )
+
+    result = await store_uploaded_files(
+        project_id=project_id,
+        category_id=cat_enum,
+        files=file_list,
+        dataset_name=dataset_name,
+        dataset_id=dataset_id,
+    )
+
+    await operation_logger.log(
+        category=cat_label,
+        message=f"Upload complete: {result['files_saved']} file(s) saved ({result['total_bytes'] // 1024} KB)",
+        level=LogLevel.SUCCESS,
+        detail=f"Dataset ID: {result['dataset_id']}, Files: {', '.join([f['filename'] for f in result.get('files', [])])}"
+    )
+
+    return result
+
+
 @router.post("/projects/{project_id}/datasets/{category_id}/upload")
 async def upload_dataset_files(
     project_id: str,
     category_id: str,
-    dataset_name: str = Form(...),
+    dataset_name: Optional[str] = Form(None),
     files: List[UploadFile] = File(...),
 ):
     """
-    REAL file upload.
-    Saves file bytes to local storage (storage_cache/), computes SHA-256,
-    registers each file in dataset_files and input_datasets tables.
-    Returns dataset_id for downstream validation and processing.
+    Project-scoped route for upload: delegates to store_uploaded_files with full validation.
     """
-    if category_id not in CATEGORY_EXTENSIONS:
-        raise HTTPException(status_code=400, detail=f"Unknown category: {category_id}")
-    if not files:
-        raise HTTPException(status_code=400, detail="No files provided")
-
-    cat_label = category_id.replace("CAT_", "").split("_")[0] if "_" in category_id else "UPLOAD"
-
-    await operation_logger.log(
-        category=cat_label,
-        message=f"Upload started: {len(files)} file(s) → {dataset_name}",
-        detail=f"Project: {project_id}, Category: {category_id}"
-    )
-
-    result = await store_uploaded_files(
+    return await upload_datasets(
         project_id=project_id,
         category_id=category_id,
         dataset_name=dataset_name,
         files=files,
     )
-
-    if not result["success"]:
-        await operation_logger.log(
-            category=cat_label,
-            message=f"Upload failed: {result.get('error')}",
-            level=LogLevel.ERROR,
-        )
-        raise HTTPException(status_code=400, detail=result.get("error", "Upload failed"))
-
-    await operation_logger.log(
-        category=cat_label,
-        message=f"Upload complete: {result['files_saved']} files, {result['total_bytes'] // 1024:.0f} KB saved",
-        level=LogLevel.SUCCESS,
-        detail=f"Dataset ID: {result['dataset_id']}"
-    )
-
-    return result
 
 
 @router.get("/projects/{project_id}/datasets")
