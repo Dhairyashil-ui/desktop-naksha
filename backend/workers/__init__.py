@@ -27,6 +27,7 @@ try:
         match_features,
     )
     from backend.point_cloud_cleaner import clean_point_cloud
+    from backend.point_cloud_registration import register_and_fuse_point_clouds
 except ImportError:
     from lidar_processor import process_lidar_dataset
     from photogrammetry_pipeline import (
@@ -36,6 +37,7 @@ except ImportError:
         match_features,
     )
     from point_cloud_cleaner import clean_point_cloud
+    from point_cloud_registration import register_and_fuse_point_clouds
 
 
 class GDALPDALWorker:
@@ -169,6 +171,25 @@ class PhotogrammetryWorker:
             "dense_points_reconstructed": res["dense_points_count"],
             "output_file": str(out_las),
             "status": "COMPLETED"
+        }
+
+    @staticmethod
+    def register_and_fuse(
+        photogrammetry_las: str,
+        lidar_las: str,
+        output_fused_path: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Step 21: GeoTransformer initial alignment + ICP refinement -> Common XYZ fused cloud.
+        """
+        res = register_and_fuse_point_clouds(
+            Path(photogrammetry_las),
+            Path(lidar_las),
+            Path(output_fused_path) if output_fused_path else None
+        )
+        return {
+            "worker": "Photogrammetry_Worker",
+            **res
         }
 
 

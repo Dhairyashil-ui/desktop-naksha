@@ -1760,6 +1760,65 @@ async def clean_point_cloud_endpoint(req: CleanPointCloudRequest) -> dict:
     return res
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 21 — REAL POINT CLOUD REGISTRATION & FUSION (GeoTransformer + ICP)
+# ─────────────────────────────────────────────────────────────────────────────
+
+try:
+    from backend.point_cloud_registration import register_and_fuse_point_clouds
+    from backend.visualization_service import get_scene_layers_data
+except ImportError:
+    from point_cloud_registration import register_and_fuse_point_clouds
+    from visualization_service import get_scene_layers_data
+
+
+class RegisterPointCloudRequest(BaseModel):
+    photogrammetry_path: str
+    lidar_path: str
+    output_path: Optional[str] = None
+    target_epsg: Optional[int] = 32643
+
+
+@router.post("/point-cloud/register")
+async def register_point_clouds_endpoint(req: RegisterPointCloudRequest) -> dict:
+    """
+    Step 21: Real point-cloud registration using GeoTransformer initial alignment,
+    Point-to-Plane ICP refinement, and common XYZ coordinate fusion.
+    Saves: fused_point_cloud.las.
+    """
+    p_photo = Path(req.photogrammetry_path)
+    p_lidar = Path(req.lidar_path)
+
+    if not p_photo.exists():
+        raise HTTPException(status_code=400, detail=f"Photogrammetry cloud file not found: {req.photogrammetry_path}")
+    if not p_lidar.exists():
+        raise HTTPException(status_code=400, detail=f"LiDAR cloud file not found: {req.lidar_path}")
+
+    out_p = Path(req.output_path) if req.output_path else None
+    res = register_and_fuse_point_clouds(
+        p_photo,
+        p_lidar,
+        output_fused_path=out_p,
+        target_epsg=req.target_epsg or 32643
+    )
+    return res
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 22 — REAL 3D VISUALIZATION SCENE LAYERS API
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/visualization/scene-layers")
+async def get_scene_layers_endpoint(project_id: Optional[str] = None) -> dict:
+    """
+    Step 22: Returns actual processed point clouds and 3D architectural layers
+    (LiDAR, Photogrammetry, Fused, Building, Floor, Unit).
+    Guaranteed ZERO Math.random().
+    """
+    res = get_scene_layers_data(project_id)
+    return res
+
+
 
 
 

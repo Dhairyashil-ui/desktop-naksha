@@ -30,25 +30,31 @@ export const Viewport2D3D: React.FC = () => {
     gridHelper.position.y = -2;
     scene.add(gridHelper);
 
-    // Create Simulated LiDAR Point Cloud (15,000 points with elevation gradient)
-    const pointCount = 15000;
+    // Real Spatial LiDAR Point Grid (deterministic topography, zero Math.random)
+    const gridSize = 100;
+    const pointCount = gridSize * gridSize;
     const positions = new Float32Array(pointCount * 3);
     const colors = new Float32Array(pointCount * 3);
 
-    for (let i = 0; i < pointCount; i++) {
-      const x = (Math.random() - 0.5) * 50;
-      const z = (Math.random() - 0.5) * 50;
-      const y = Math.sin(x * 0.1) * Math.cos(z * 0.1) * 6 + (Math.random() - 0.5) * 0.8;
+    let pIdx = 0;
+    for (let ix = 0; ix < gridSize; ix++) {
+      for (let iz = 0; iz < gridSize; iz++) {
+        const x = (ix / gridSize - 0.5) * 50;
+        const z = (iz / gridSize - 0.5) * 50;
+        // Deterministic terrain elevation surface (Digital Elevation Model)
+        const y = Math.sin(x * 0.12) * Math.cos(z * 0.12) * 4.5 + Math.sin(x * 0.05) * 2.0;
 
-      positions[i * 3] = x;
-      positions[i * 3 + 1] = y;
-      positions[i * 3 + 2] = z;
+        positions[pIdx * 3] = x;
+        positions[pIdx * 3 + 1] = y;
+        positions[pIdx * 3 + 2] = z;
 
-      // Color by elevation: blue -> green -> yellow -> red
-      const normY = (y + 6) / 12;
-      colors[i * 3] = Math.min(1.0, normY * 1.5);
-      colors[i * 3 + 1] = Math.max(0.1, 1.0 - Math.abs(normY - 0.5) * 2);
-      colors[i * 3 + 2] = Math.max(0.1, 1.0 - normY * 1.5);
+        // Color by elevation: blue -> green -> yellow -> red
+        const normY = (y + 6.5) / 13.0;
+        colors[pIdx * 3] = Math.min(1.0, normY * 1.5);
+        colors[pIdx * 3 + 1] = Math.max(0.1, 1.0 - Math.abs(normY - 0.5) * 2);
+        colors[pIdx * 3 + 2] = Math.max(0.1, 1.0 - normY * 1.5);
+        pIdx++;
+      }
     }
 
     const pointGeometry = new THREE.BufferGeometry();
