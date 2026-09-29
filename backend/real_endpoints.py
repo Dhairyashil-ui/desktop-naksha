@@ -50,6 +50,14 @@ try:
         format_gnss_response,
         ALL_GNSS_EXTS,
     )
+    from backend.asset_scanner import (
+        scan_asset_dataset,
+        format_asset_response,
+    )
+    from backend.readiness_engine import (
+        calculate_project_readiness_from_db,
+        calculate_readiness,
+    )
 except ImportError:
     from database import engine
     from ingestion import (
@@ -78,6 +86,14 @@ except ImportError:
         scan_gnss_dataset,
         format_gnss_response,
         ALL_GNSS_EXTS,
+    )
+    from asset_scanner import (
+        scan_asset_dataset,
+        format_asset_response,
+    )
+    from readiness_engine import (
+        calculate_project_readiness_from_db,
+        calculate_readiness,
     )
 
 router = APIRouter(prefix="/api/v2", tags=["real"])
@@ -1296,5 +1312,180 @@ async def get_gnss_scan_result(dataset_id: str, project_id: str) -> dict:
         "last_scanned": str(row.updated_at) if row.updated_at else None,
         "manifest": manifest,
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 14 — DEDICATED ASSET SCAN ENDPOINT (DEM, BIM, PROPERTY, ORTHO, DOCS)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post("/datasets/{dataset_id}/scan/asset")
+@router.post("/datasets/{dataset_id}/scan/dem")
+@router.post("/datasets/{dataset_id}/scan/bim")
+@router.post("/datasets/{dataset_id}/scan/property")
+@router.post("/datasets/{dataset_id}/scan/ortho")
+@router.post("/datasets/{dataset_id}/scan/document")
+async def scan_asset(
+    dataset_id: str,
+    project_id: str,
+) -> dict:
+    """
+    Real Asset Scanner for DEM, BIM, Property, Orthophoto, and Documents (Step 14).
+    Handles:
+    - DEM / DTM / DSM: Rasterio GeoTIFF elevation model, min/max/mean elevation, nodata.
+    - Orthophoto: GeoTIFF COG, RGB/RGBA channels, GSD resolution, bounds.
+    - BIM / Floor Plans: IFC (IfcOpenShell elements), RVT (marked REQUIRES_MANUAL_REVIEW),
+      DXF floor plans (ezdxf), PDF/Raster floor plans (marked REQUIRES_MANUAL_REVIEW).
+    - Property Registers: CSV / XLSX / XLS (pandas/openpyxl cadastral owner/parcel tables).
+    - Supporting Docs: PDF / DOCX (pypdf/python-docx; scanned PDFs marked REQUIRES_MANUAL_REVIEW).
+    """
+    from pathlib import Path
+
+    try:
+        from backend.config import settings
+    except ImportError:
+        from config import settings
+
+    with engine.connect() as conn:
+        ds_row = conn.execute(
+            sql_text("SELECT category FROM input_datasets WHERE id = :id"),
+            {"id": dataset_id},
+        ).fetchone()
+
+        if not ds_row:
+            raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found")
+
+        category_enum = ds_row.category
+
+        rows = conn.execute(
+            sql_text("""
+                SELECT df.filename, df.relative_path, df.storage_location
+                FROM dataset_files df
+                WHERE df.dataset_id = :ds_id
+                ORDER BY df.filename
+            """),
+            {"ds_id": dataset_id},
+        ).fetchall()
+
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' has no files")
+
+    base_storage = Path(settings.LOCAL_STORAGE_PATH).resolve()
+    file_paths = []
+    for row in rows:
+        rel = row.relative_path or row.filename
+        p = base_storage / rel
+        if not p.exists() and row.storage_location:
+            p = Path(row.storage_location)
+        if p.exists():
+            file_paths.append(p)
+
+    if not file_paths:
+        return {
+            "category": category_enum,
+            "completeness": 0.0,
+            "quality": 0.0,
+            "status": "REJECTED",
+            "summary": {"total_files": 0, "readable_files": 0},
+            "issues": ["No files found on disk for this dataset"],
+            "warnings": [],
+            "files": [],
+        }
+
+    report = scan_asset_dataset(
+        category_id=category_enum,
+        dataset_id=dataset_id,
+        project_id=project_id,
+        file_paths=file_paths,
+    )
+
+    db_status = "VALID" if report.status == "READY" else (
+        "PARTIAL" if report.status in ("PARTIAL", "REQUIRES_MANUAL_REVIEW") else "INVALID"
+    )
+    val_status = "PASSED" if report.status == "READY" else (
+        "REQUIRES_MANUAL_REVIEW" if report.status == "REQUIRES_MANUAL_REVIEW" else (
+            "PARTIAL" if report.status == "PARTIAL" else "FAILED"
+        )
+    )
+    now = datetime.now(timezone.utc)
+    scanned_at_iso = now.isoformat()
+    manifest_payload = {
+        "scanned_at": scanned_at_iso,
+        "pipeline": f"{category_enum}_SCANNER_V1",
+        "scanner_module": "asset_scanner",
+        "total_files": report.total_files,
+        "readable_files": report.readable_files,
+        "requires_manual_review": report.requires_manual_review,
+        "manual_review_items": report.manual_review_items,
+        "dominant_epsg": report.dominant_epsg,
+        "crs": report.crs_string,
+        "bbox": report.combined_bbox,
+        "quality_score": report.quality,
+        "completeness_score": report.completeness,
+        "status": report.status,
+        "issues": report.issues,
+        "warnings": report.warnings,
+    }
+
+    with engine.connect() as conn:
+        conn.execute(
+            sql_text("""
+                UPDATE input_datasets
+                SET completeness      = :completeness,
+                    quality           = :quality,
+                    status            = CAST(:status AS dataset_status_enum),
+                    validation_status = :val_status,
+                    readiness_score   = :readiness,
+                    epsg_detected     = :epsg,
+                    metadata_manifest = CAST(:manifest AS jsonb),
+                    updated_at        = :now
+                WHERE id = :id
+            """),
+            {
+                "id": dataset_id,
+                "completeness": report.completeness,
+                "quality": report.quality,
+                "status": db_status,
+                "val_status": val_status,
+                "readiness": report.quality,
+                "epsg": report.dominant_epsg,
+                "manifest": json.dumps(manifest_payload),
+                "now": now,
+            },
+        )
+        conn.commit()
+
+    return format_asset_response(report)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 15 — REAL DYNAMIC PROJECT READINESS ENDPOINT
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/projects/{project_id}/readiness")
+async def get_project_readiness_endpoint(project_id: str) -> dict:
+    """
+    Step 15: Calculates real overall project readiness dynamically from
+    actual datasets in PostgreSQL. Zero hardcoding.
+    """
+    return calculate_project_readiness_from_db(project_id)
+
+
+class ReadinessSimRequest(BaseModel):
+    scores: Optional[dict] = None
+
+
+@router.post("/projects/{project_id}/readiness")
+async def post_project_readiness_endpoint(
+    project_id: str,
+    req: Optional[ReadinessSimRequest] = None,
+) -> dict:
+    """
+    Step 15: Computes real project readiness from database, or runs custom simulation
+    scores if explicitly provided in request body.
+    """
+    if req and req.scores:
+        return calculate_readiness(req.scores)
+    return calculate_project_readiness_from_db(project_id)
+
 
 

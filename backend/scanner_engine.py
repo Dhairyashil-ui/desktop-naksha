@@ -51,6 +51,10 @@ try:
         format_gnss_response,
         ALL_GNSS_EXTS,
     )
+    from backend.asset_scanner import (
+        scan_asset_dataset,
+        format_asset_response,
+    )
 except ImportError:
     from config import settings
     from database import engine
@@ -74,6 +78,10 @@ except ImportError:
         scan_gnss_dataset,
         format_gnss_response,
         ALL_GNSS_EXTS,
+    )
+    from asset_scanner import (
+        scan_asset_dataset,
+        format_asset_response,
     )
 
 from sqlalchemy import text
@@ -1348,6 +1356,173 @@ async def run_real_scanner_pipeline(
             ready_for_processing=ready_for_proc,
             crs_detected=crs_detected, epsg=epsg_detected, bbox=bbox,
             feature_count=n_pts, steps=steps, quality_checks=quality_checks,
+            metadata=manifest_payload, scanned_at=scanned_at_iso,
+        )
+
+    # ── CAT_05 through CAT_10: Asset Scanner fast-path (stages 3-10) ───
+    if category_enum in (
+        "CAT_05_DEM_ELEVATION",
+        "CAT_06_ARCHITECTURAL_BIM",
+        "CAT_07_PROPERTY_VERTICAL_DATA",
+        "CAT_08_IMAGERY_ORTHOPHOTO",
+        "CAT_09_PROJECT_METADATA",
+        "CAT_10_SUPPORTING_DOCS",
+    ):
+        file_paths = [p for _, p in existing_files]
+        await emit_step(
+            3, "FORMAT_PARSER", "Format parser", "pass",
+            f"Dispatching {len(file_paths)} file(s) to asset scanner ({category_enum})", 30
+        )
+
+        asset_report = scan_asset_dataset(
+            category_id=category_enum,
+            dataset_id=dataset_id,
+            project_id=project_id,
+            file_paths=file_paths,
+        )
+
+        n_files = asset_report.total_files
+        n_readable = asset_report.readable_files
+        await emit_step(
+            4, "METADATA_EXTRACTION", "Metadata extraction",
+            "pass" if n_readable > 0 else "fail",
+            f"{n_files} file(s) evaluated; {n_readable} valid format structure(s)", 40
+        )
+
+        crs_detected = asset_report.crs_string
+        epsg_detected = asset_report.dominant_epsg
+        crs_status = "pass" if epsg_detected else ("warning" if category_enum in ("CAT_05_DEM_ELEVATION", "CAT_08_IMAGERY_ORTHOPHOTO") else "pass")
+        await emit_step(5, "COORDINATE_CRS_DETECTION", "Coordinate/CRS detection", crs_status,
+                        crs_detected or "Local / Non-projected tabular coordinates", 50)
+
+        bbox = asset_report.combined_bbox
+        geom_detail = (
+            f"bbox: ({bbox['x_min']:.2f}, {bbox['y_min']:.2f}) - ({bbox['x_max']:.2f}, {bbox['y_max']:.2f})"
+            if bbox else "Non-spatial / attributes dataset"
+        )
+        await emit_step(6, "GEOMETRY_CHECKS", "Geometry checks",
+                        "pass" if (bbox or category_enum in ("CAT_07_PROPERTY_VERTICAL_DATA", "CAT_09_PROJECT_METADATA", "CAT_10_SUPPORTING_DOCS")) else "warning",
+                        geom_detail, 60)
+
+        reqs_passed = (n_readable > 0 and not asset_report.issues)
+        req_detail = "Requirements met" if reqs_passed else (
+            f"Requires manual review: {len(asset_report.manual_review_items)} item(s)" if asset_report.requires_manual_review else "Deficit in dataset requirements"
+        )
+        await emit_step(7, "DATASET_REQUIREMENTS", "Dataset requirements",
+                        "pass" if reqs_passed else ("warning" if asset_report.requires_manual_review else "fail"),
+                        req_detail, 70)
+
+        quality_score = asset_report.quality
+        completeness_score = asset_report.completeness
+
+        quality_checks = [
+            QualityItemResult(
+                name="Format Integrity",
+                status="pass" if n_readable > 0 else "fail",
+                note=f"{n_readable}/{n_files} files parsed",
+                metric=f"{n_readable}/{n_files}",
+            ),
+            QualityItemResult(
+                name="Review Status",
+                status="warning" if asset_report.requires_manual_review else "pass",
+                note="Requires manual inspection" if asset_report.requires_manual_review else "Automatic parse verified",
+                metric="Manual Review" if asset_report.requires_manual_review else "Verified",
+            ),
+            QualityItemResult(
+                name="Spatial Reference",
+                status=crs_status,
+                note=crs_detected or "Non-spatial / Relative",
+                metric=f"EPSG:{epsg_detected}" if epsg_detected else "Relative",
+            ),
+        ]
+
+        await emit_step(8, "QUALITY_CHECKS", "Quality checks",
+                        "pass" if quality_score >= 75 else "warning",
+                        f"Quality: {quality_score:.1f}%", 80)
+        await emit_step(9, "COMPLETENESS_CALCULATION", "Completeness calculation",
+                        "pass" if completeness_score >= 80 else "warning",
+                        f"Completeness: {completeness_score:.1f}%", 90)
+
+        dataset_status = asset_report.status
+        db_status = "VALID" if dataset_status == "READY" else (
+            "PARTIAL" if dataset_status in ("PARTIAL", "REQUIRES_MANUAL_REVIEW") else "INVALID"
+        )
+        val_status = "PASSED" if dataset_status == "READY" else (
+            "REQUIRES_MANUAL_REVIEW" if dataset_status == "REQUIRES_MANUAL_REVIEW" else (
+                "PARTIAL" if dataset_status == "PARTIAL" else "FAILED"
+            )
+        )
+        ready_for_proc = (dataset_status == "READY")
+
+        now = datetime.now(timezone.utc)
+        scanned_at_iso = now.isoformat()
+        manifest_payload = {
+            "scanned_at": scanned_at_iso,
+            "pipeline": f"{category_enum}_SCANNER_V1",
+            "scanner_module": "asset_scanner",
+            "total_files": n_files,
+            "readable_files": n_readable,
+            "requires_manual_review": asset_report.requires_manual_review,
+            "manual_review_items": asset_report.manual_review_items,
+            "dominant_epsg": epsg_detected,
+            "crs": crs_detected,
+            "bbox": bbox,
+            "quality_score": quality_score,
+            "completeness_score": completeness_score,
+            "status": dataset_status,
+            "issues": asset_report.issues,
+            "warnings": asset_report.warnings,
+        }
+
+        with engine.connect() as conn:
+            conn.execute(text("""
+                UPDATE input_datasets
+                SET status = CAST(:status AS dataset_status_enum),
+                    completeness = :completeness, quality = :quality,
+                    validation_status = :val_status, readiness_score = :readiness,
+                    epsg_detected = :epsg,
+                    metadata_manifest = CAST(:manifest AS jsonb), updated_at = :now
+                WHERE id = :id;
+            """), {
+                "id": dataset_id, "status": db_status,
+                "completeness": completeness_score, "quality": quality_score,
+                "val_status": val_status, "readiness": quality_score,
+                "epsg": epsg_detected, "manifest": json.dumps(manifest_payload), "now": now,
+            })
+            conn.execute(text("""
+                INSERT INTO validation_results (
+                    id, dataset_id, accuracy_tier_evaluated, verdict,
+                    readiness_score, required_passed, required_checks,
+                    recommended_checks, quality_metrics, remediation_cards, evaluated_at
+                ) VALUES (
+                    :id, :dataset_id, 'TIER_1_CADASTRAL_LEGAL', CAST(:verdict AS dataset_status_enum),
+                    :readiness, :req_passed, CAST(:req_checks AS jsonb),
+                    CAST(:rec_checks AS jsonb), CAST(:q_metrics AS jsonb), '[]'::jsonb, :now
+                );
+            """), {
+                "id": str(__import__("uuid").uuid4()), "dataset_id": dataset_id,
+                "verdict": db_status, "readiness": quality_score,
+                "req_passed": reqs_passed,
+                "req_checks": json.dumps([s.dict() for s in steps]),
+                "rec_checks": json.dumps([q.dict() for q in quality_checks]),
+                "q_metrics": json.dumps({"completeness": completeness_score, "quality": quality_score}),
+                "now": now,
+            })
+            conn.commit()
+
+        feature_count = n_readable
+        await emit_step(10, "FINAL_DATASET_STATUS", "Final dataset status",
+                        "pass" if ready_for_proc else "warning",
+                        f"{category_enum} — {dataset_status} | Completeness: {completeness_score:.1f}%"
+                        f" | Quality: {quality_score:.1f}%", 100)
+
+        return ScannerPipelineResult(
+            dataset_id=dataset_id, project_id=project_id, category=category_enum,
+            name=dataset_name, status=dataset_status, validation_status=val_status,
+            completeness=completeness_score, quality=quality_score,
+            ready_for_processing=ready_for_proc,
+            crs_detected=crs_detected, epsg=epsg_detected, bbox=bbox,
+            feature_count=feature_count, steps=steps, quality_checks=quality_checks,
             metadata=manifest_payload, scanned_at=scanned_at_iso,
         )
 

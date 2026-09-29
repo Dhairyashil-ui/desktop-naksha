@@ -339,7 +339,7 @@ export const DataInputsScreen: React.FC<DataInputsScreenProps> = ({
               PROCESSING STATUS
             </div>
             <div className={`text-sm font-bold font-mono tracking-wider uppercase mt-1 ${
-              readiness.processingStatus === 'READY'
+              readiness.processingStatus === 'READY' || readiness.processingStatus === 'READY FOR PROCESSING'
                 ? 'text-emerald-600'
                 : readiness.processingStatus === 'BLOCKED'
                 ? 'text-zinc-400'
@@ -352,7 +352,7 @@ export const DataInputsScreen: React.FC<DataInputsScreenProps> = ({
 
         {/* Action Button: SCAN DATA or DISPATCH PROCESSING */}
         <div className="flex flex-col items-center space-y-3">
-          {readiness.processingStatus === 'READY' && onDispatchPipeline ? (
+          {(readiness.processingStatus === 'READY' || readiness.processingStatus === 'READY FOR PROCESSING') && onDispatchPipeline ? (
             <button
               onClick={onDispatchPipeline}
               className="w-full max-w-xs py-3.5 px-6 rounded-lg text-xs font-bold font-mono tracking-wider uppercase transition-all shadow-sm flex items-center justify-center space-x-2 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white hover:shadow"

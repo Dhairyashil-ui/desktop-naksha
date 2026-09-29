@@ -252,26 +252,31 @@ async def websocket_telemetry(websocket: WebSocket, project_id: str):
         active_connections.remove(websocket)
 
 try:
-    from backend.readiness_engine import calculate_readiness
+    from backend.readiness_engine import calculate_readiness, calculate_project_readiness_from_db
     from backend.job_graph import create_canonical_job_001, JobGraphExecutor
 except ImportError:
-    from readiness_engine import calculate_readiness
+    from readiness_engine import calculate_readiness, calculate_project_readiness_from_db
     from job_graph import create_canonical_job_001, JobGraphExecutor
 
 class ReadinessCalculationRequest(BaseModel):
     scores: Optional[dict] = None
 
+@app.get("/api/v2/projects/{project_id}/readiness")
+def get_project_readiness_get(project_id: str):
+    """
+    Step 15: Real project readiness calculated dynamically from PostgreSQL datasets.
+    Zero hardcoded values.
+    """
+    return calculate_project_readiness_from_db(project_id)
+
 @app.post("/api/v2/projects/{project_id}/readiness")
 def get_project_readiness(project_id: str, req: Optional[ReadinessCalculationRequest] = None):
     """
-    Phase 11: Computes workflow-aware overall data readiness,
-    required data fulfillment (100%), optional data score (72%), and processing status (READY).
+    Step 15: Computes real project readiness from database, or allows custom simulation scores if provided.
     """
-    scores = (req and req.scores) or {
-        "cat_01": 90.0, "cat_02": 100.0, "cat_03": 95.0, "cat_04": 90.0, "cat_05": 80.0,
-        "cat_06": 70.0, "cat_07": 100.0, "cat_08": 90.0, "cat_09": 100.0, "cat_10": 60.0
-    }
-    return calculate_readiness(scores)
+    if req and req.scores:
+        return calculate_readiness(req.scores)
+    return calculate_project_readiness_from_db(project_id)
 
 @app.get("/api/v2/jobs/graph/template")
 def get_job_graph_template(project_id: str = "project_pune_001"):
@@ -637,12 +642,12 @@ def download_all_packages_bundle():
 try:
     from backend.database import check_database_health, engine
     from backend.storage import storage_client
-    from backend.queue import task_broker
+    from backend.task_queue import task_broker
     from backend.workers import GDALPDALWorker, PhotogrammetryWorker, AI3DWorker
 except ImportError:
     from database import check_database_health, engine
     from storage import storage_client
-    from queue import task_broker
+    from task_queue import task_broker
     from workers import GDALPDALWorker, PhotogrammetryWorker, AI3DWorker
 from sqlalchemy import text
 

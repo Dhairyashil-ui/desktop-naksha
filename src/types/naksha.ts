@@ -143,7 +143,7 @@ export interface ReadinessResult {
   overallReadiness: number;      // e.g. 89%
   requiredData: number;          // e.g. 100%
   optionalData: number;          // e.g. 72%
-  processingStatus: 'READY' | 'NOT READY' | 'BLOCKED';
+  processingStatus: 'READY' | 'READY FOR PROCESSING' | 'NOT READY' | 'BLOCKED';
 }
 
 export const DEFAULT_CATEGORY_TIERS: Record<string, DatasetTier> = {
