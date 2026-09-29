@@ -82,6 +82,14 @@ const ALL_UNITS: PropertyUnit3D[] = (() => {
         ctsNumber: `CTS 142/B-${unitNum}`,
         ulpin: `MH-PUN-2026-0942-${unitNum}`,
         undividedLandSharePct: 1.5625,
+        structuredIdentity: {
+          base_ulpin: '27-07-005-012345',
+          floor_id: `F${f < 10 ? '0' + f : f}`,
+          unit_id: uLetter,
+          volume_id: `VOL_27-07-005-012345_F${f < 10 ? '0' + f : f}_${uLetter}`,
+          property_id_3d: `PROP3D_27-07-005-012345_F${f < 10 ? '0' + f : f}_${uLetter}`,
+          display_ulpin_3d: `27-07-005-012345-F${f < 10 ? '0' + f : f}-${uLetter}`
+        },
         footprint2D: {
           polygon: [[finalX - 3.5, finalY - 2.0], [finalX + 3.5, finalY - 2.0], [finalX + 3.5, finalY + 1.2], [finalX + 2.2, finalY + 1.2], [finalX + 2.2, finalY + 2.0], [finalX - 3.5, finalY + 2.0]],
           perimeter_m: 21.6,
@@ -365,6 +373,21 @@ export const Property3DLayerScreen: React.FC<Property3DLayerScreenProps> = ({
                 </div>
               </div>
               <FileCheck2 className="w-4 h-4 text-blue-600 shrink-0" />
+            </div>
+
+            {/* 3D Property Identity (ULPIN-3D) - Step 29 & Step 30 */}
+            <div className="bg-gradient-to-r from-blue-50/80 to-indigo-50/80 border border-blue-200/80 rounded-xl p-2.5 space-y-1">
+              <div className="text-[10px] font-bold text-blue-700 uppercase tracking-wider flex items-center justify-between">
+                <span>3D PROPERTY IDENTITY</span>
+                <span className="text-[9px] bg-blue-600 text-white px-1.5 py-0.5 rounded font-mono font-bold">ULPIN-3D</span>
+              </div>
+              <div className="text-xs font-bold font-mono text-blue-950 tracking-tight">
+                {selectedUnit.structuredIdentity?.display_ulpin_3d || `27-07-005-012345-F0${selectedUnit.floor}-${selectedUnit.unitAlias?.replace('Flat ', '') || 'A'}`}
+              </div>
+              <div className="text-[10px] text-blue-800/80 font-mono flex items-center justify-between pt-1 border-t border-blue-200/60">
+                <span>Base 2D: <span className="font-semibold text-blue-900">27-07-005-012345</span></span>
+                <span>F0{selectedUnit.floor} • {selectedUnit.unitAlias}</span>
+              </div>
             </div>
 
             {/* 1. 2D Footprint Section */}

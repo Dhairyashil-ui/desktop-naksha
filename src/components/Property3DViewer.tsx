@@ -25,6 +25,14 @@ export interface PropertyUnit3D {
   ctsNumber: string;
   ulpin: string;
   undividedLandSharePct: number;
+  structuredIdentity?: {
+    base_ulpin: string;
+    floor_id: string;
+    unit_id: string;
+    volume_id: string;
+    property_id_3d: string;
+    display_ulpin_3d: string;
+  };
   footprint2D?: {
     polygon: [number, number][];
     perimeter_m: number;

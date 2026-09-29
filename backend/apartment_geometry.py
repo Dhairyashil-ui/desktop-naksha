@@ -226,8 +226,14 @@ class ApartmentGeometryEngine:
         },
     ]
 
-    def __init__(self, parcel_id: str = "CTS 142/B (Survey No. 48/2)", village: str = "Haveli / Pune"):
+    def __init__(
+        self,
+        parcel_id: str = "CTS 142/B (Survey No. 48/2)",
+        base_ulpin: str = "27-07-005-012345",
+        village: str = "Haveli / Pune"
+    ):
         self.parcel_id = parcel_id
+        self.base_ulpin = base_ulpin
         self.village = village
         self.total_parcel_area_sqm = 1600.00
 
@@ -373,11 +379,30 @@ class ApartmentGeometryEngine:
                 f_list = [[int(f[0]), int(f[1]), int(f[2])] for f in mesh_3d.faces]
                 norm_list = [[round(float(n[0]), 3), round(float(n[1]), 3), round(float(n[2]), 3)] for n in mesh_3d.face_normals]
 
-                # Associated Cadastral Parcel Data
+                # Step 29 & Step 30: Structured 3D Property Identity (Base 2D ULPIN + Floor + Unit)
+                from backend.cadastral_identity import cadastral_engine
+                struct_ident = cadastral_engine.create_structured_identity(
+                    base_ulpin=self.base_ulpin,
+                    floor_number=fl_num,
+                    unit_code=unit_letter,
+                    building_id="BLDG-001",
+                    metadata={
+                        "unit_number": str(unit_num),
+                        "unit_name": f"Flat {unit_letter} (Unit {unit_num})",
+                        "area_sqm": area_m2,
+                        "volume_m3": volume_m3,
+                        "centroid": [cx, cy, cz]
+                    }
+                )
+                cadastral_engine.persist_identity(struct_ident)
+
+                # Associated Cadastral Parcel Data (Step 29: Base 2D ULPIN is preserved as root)
                 share_pct = round((area_m2 / self.total_parcel_area_sqm) * 100.0, 3)
                 associated_parcel = {
                     "parcel_id": self.parcel_id,
-                    "ulpin": f"MH-PUN-2026-0942-{unit_num:04d}",
+                    "base_ulpin": self.base_ulpin,
+                    "ulpin_2d": self.base_ulpin,
+                    "ulpin_length": 14,
                     "village": self.village,
                     "district": "Pune",
                     "total_parcel_area_sqm": self.total_parcel_area_sqm,
@@ -413,6 +438,9 @@ class ApartmentGeometryEngine:
                     "unit_number": str(unit_num),
                     "unit_name": f"Flat {unit_letter} (Unit {unit_num})",
                     "unit_type": tpl["type"],
+                    "display_ulpin_3d": struct_ident.display_ulpin_3d,
+                    "base_ulpin": self.base_ulpin,
+                    "structured_identity": struct_ident.to_dict(),
                     "floor_id": fl_id,
                     "floor_number": fl_num,
                     "floor_label": fl_label,

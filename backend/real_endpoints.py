@@ -2054,6 +2054,98 @@ async def get_apartment_detail_endpoint(unit_id: str) -> dict:
     raise HTTPException(status_code=404, detail=f"Apartment unit '{unit_id}' not found.")
 
 
+# =====================================================================
+# STEP 29 & STEP 30: 2D ULPIN ASSOCIATION & STRUCTURED 3D IDENTITY
+# =====================================================================
+
+class Generate3DIdentityRequest(BaseModel):
+    base_ulpin: str = "27-07-005-012345"
+    floor_number: int = 12
+    unit_code: str = "A"
+    building_id: str = "BLDG-001"
+    format_standard: Optional[str] = "STANDARD_PROPOSED"
+    metadata: Optional[dict] = None
+
+
+class Format3DIdentityRequest(BaseModel):
+    base_ulpin: str
+    floor_id: str
+    unit_id: str
+    target_standard: str = "STANDARD_PROPOSED"
+
+
+@router.post("/cadastre/3d-identity/generate")
+async def generate_3d_identity_endpoint(req: Generate3DIdentityRequest) -> dict:
+    """
+    Step 30: Generates a structured 3D property identity and formats display identifier.
+    Structured fields: base_ulpin, floor_id, unit_id, volume_id, 3d_property_id.
+    """
+    from backend.cadastral_identity import cadastral_engine
+    identity = cadastral_engine.create_structured_identity(
+        base_ulpin=req.base_ulpin,
+        floor_number=req.floor_number,
+        unit_code=req.unit_code,
+        building_id=req.building_id,
+        format_standard=req.format_standard or "STANDARD_PROPOSED",
+        metadata=req.metadata or {}
+    )
+    cadastral_engine.persist_identity(identity)
+    return {
+        "status": "SUCCESS",
+        "structured_identity": identity.to_dict()
+    }
+
+
+@router.get("/cadastre/3d-identity/{query}")
+async def get_3d_identity_endpoint(query: str) -> dict:
+    """
+    Retrieves or parses a structured 3D property identity by 3d_property_id or display string.
+    """
+    from backend.cadastral_identity import cadastral_engine
+    ident = cadastral_engine.get_by_property_id_or_display(query)
+    if not ident:
+        raise HTTPException(status_code=404, detail=f"3D property identity '{query}' not found.")
+    return {
+        "status": "SUCCESS",
+        "identity": ident.to_dict()
+    }
+
+
+@router.get("/cadastre/parcels/{base_ulpin}/strata-tree")
+async def get_parcel_strata_tree_endpoint(base_ulpin: str) -> dict:
+    """
+    Step 29: Associate building with existing 2D ULPIN.
+    Returns:
+    2D Parcel (14-digit ULPIN) -> Building -> Strata Floors -> Units
+    The base 2D ULPIN is preserved as the permanent parent root.
+    """
+    from backend.cadastral_identity import cadastral_engine
+    return cadastral_engine.get_strata_tree(base_ulpin)
+
+
+@router.post("/cadastre/3d-identity/format")
+async def format_3d_identity_endpoint(req: Format3DIdentityRequest) -> dict:
+    """
+    Step 30 Pluggable Formatter: Demonstrates changing the display representation
+    without schema modifications or database rebuilding.
+    """
+    from backend.cadastral_identity import PropertyIdentityFormatter
+    formatted = PropertyIdentityFormatter.format(
+        base_ulpin=req.base_ulpin,
+        floor_id=req.floor_id,
+        unit_id=req.unit_id,
+        standard=req.target_standard
+    )
+    return {
+        "status": "SUCCESS",
+        "base_ulpin": req.base_ulpin,
+        "floor_id": req.floor_id,
+        "unit_id": req.unit_id,
+        "target_standard": req.target_standard,
+        "display_identifier": formatted
+    }
+
+
 
 
 
