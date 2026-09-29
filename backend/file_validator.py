@@ -77,7 +77,7 @@ def _analyze_las_file(file_path: Path) -> Dict[str, Any]:
             result = {
                 "ok": True,
                 "point_count": point_count,
-                "las_version": f"{header.version_major}.{header.version_minor}",
+                "las_version": str(getattr(header, "version", "1.2")),
                 "point_format": header.point_format.id if hasattr(header.point_format, "id") else str(header.point_format),
                 "x_min": float(mins[0]), "x_max": float(maxs[0]),
                 "y_min": float(mins[1]), "y_max": float(maxs[1]),

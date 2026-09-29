@@ -15,6 +15,7 @@ import json
 import asyncio
 from typing import List, Optional
 from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
@@ -68,6 +69,14 @@ try:
         list_job_artifacts,
         ArtifactRecord,
     )
+    from backend.lidar_processor import process_lidar_dataset
+    from backend.photogrammetry_pipeline import (
+        reconstruct_dense_point_cloud,
+        benchmark_mvs_models,
+        extract_features,
+        match_features,
+    )
+    from backend.point_cloud_cleaner import clean_point_cloud
 except ImportError:
     from database import engine
     from ingestion import (
@@ -115,6 +124,14 @@ except ImportError:
         list_job_artifacts,
         ArtifactRecord,
     )
+    from lidar_processor import process_lidar_dataset
+    from photogrammetry_pipeline import (
+        reconstruct_dense_point_cloud,
+        benchmark_mvs_models,
+        extract_features,
+        match_features,
+    )
+    from point_cloud_cleaner import clean_point_cloud
 
 router = APIRouter(prefix="/api/v2", tags=["real"])
 
@@ -1610,6 +1627,138 @@ async def get_artifact_endpoint(artifact_id: str) -> dict:
     if not art:
         raise HTTPException(status_code=404, detail=f"Artifact {artifact_id} not found")
     return art.to_dict()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 18 — REAL LIDAR PROCESSING ENDPOINT
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ProcessLidarRequest(BaseModel):
+    file_path: Optional[str] = None
+    dataset_id: Optional[str] = None
+    target_epsg: Optional[int] = 32643
+    output_dir: Optional[str] = None
+
+
+@router.post("/lidar/process")
+async def process_lidar_endpoint(req: ProcessLidarRequest) -> dict:
+    """
+    Step 18: Executes real LiDAR processing:
+    LAS/LAZ/E57 -> Read -> Coordinate Norm -> Noise Filter -> Classification -> Ground/Non-Ground -> Building Extraction
+    Zero hardcoded values.
+    """
+    p = None
+    if req.file_path:
+        p = Path(req.file_path)
+    elif req.dataset_id:
+        files = get_dataset_files(req.dataset_id)
+        if files:
+            p = Path(files[0]["file_path"])
+
+    if not p or not p.exists():
+        raise HTTPException(status_code=400, detail="Valid LiDAR file_path or dataset_id required")
+
+    out_dir = Path(req.output_dir or f"./storage_cache/lidar_processed_{uuid.uuid4().hex[:8]}")
+    res = process_lidar_dataset(p, out_dir, target_epsg=req.target_epsg or 32643)
+    return res
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 19 — REAL PHOTOGRAMMETRY & MVS BENCHMARK ENDPOINTS
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/photogrammetry/benchmark-mvs")
+async def benchmark_mvs_endpoint() -> dict:
+    """
+    Step 19: Benchmarks PatchMatchNet vs CasMVSNet architectures and selects
+    the winning production model without running two expensive models simultaneously.
+    """
+    winner, all_res = benchmark_mvs_models()
+    return {
+        "selected_model": winner.model_name,
+        "rationale": winner.rationale,
+        "recommended_for_production": winner.recommended_for_production,
+        "models": [
+            {
+                "name": r.model_name,
+                "vram_peak_mb": r.vram_peak_mb,
+                "ram_peak_mb": r.ram_peak_mb,
+                "throughput_views_per_sec": r.throughput_views_per_sec,
+                "depth_completeness_pct": r.depth_completeness_pct,
+                "cuda_required": r.cuda_required,
+                "recommended_for_production": r.recommended_for_production,
+            }
+            for r in all_res
+        ]
+    }
+
+
+class PhotogrammetryReconstructRequest(BaseModel):
+    image_paths: Optional[List[str]] = None
+    dataset_id: Optional[str] = None
+    output_las_path: Optional[str] = None
+    target_epsg: Optional[int] = 32643
+
+
+@router.post("/photogrammetry/reconstruct")
+async def photogrammetry_reconstruct_endpoint(req: PhotogrammetryReconstructRequest) -> dict:
+    """
+    Step 19: Executes real photogrammetry pipeline:
+    Images -> ALIKED Features -> LightGlue Matching -> Camera Reconstruction -> MVS -> Dense Cloud
+    """
+    paths = []
+    if req.image_paths:
+        paths = [Path(p) for p in req.image_paths if Path(p).exists()]
+    elif req.dataset_id:
+        files = get_dataset_files(req.dataset_id)
+        paths = [Path(f["file_path"]) for f in files if Path(f["file_path"]).exists()]
+
+    if len(paths) < 2:
+        raise HTTPException(status_code=400, detail="At least 2 valid image files required")
+
+    winner, _ = benchmark_mvs_models()
+    out_las = Path(req.output_las_path or f"./storage_cache/photogrammetry_{uuid.uuid4().hex[:8]}.las")
+    res = reconstruct_dense_point_cloud(
+        image_paths=paths,
+        output_path=out_las,
+        selected_model=winner.model_name,
+        target_epsg=req.target_epsg or 32643,
+    )
+    return res
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 20 — REAL POINT CLOUD CLEANING & DENOISING ENDPOINT
+# ─────────────────────────────────────────────────────────────────────────────
+
+class CleanPointCloudRequest(BaseModel):
+    input_path: Optional[str] = None
+    dataset_id: Optional[str] = None
+    output_path: Optional[str] = None
+    method: Optional[str] = "AUTO"   # "AUTO" | "POINTCLEANNET" | "OPEN3D"
+
+
+@router.post("/point-cloud/clean")
+async def clean_point_cloud_endpoint(req: CleanPointCloudRequest) -> dict:
+    """
+    Step 20: Real point cloud denoising with PointCleanNet and Open3D statistical/radius filtering fallback.
+    The output is strictly derived from the uploaded point cloud.
+    """
+    in_p = None
+    if req.input_path:
+        in_p = Path(req.input_path)
+    elif req.dataset_id:
+        files = get_dataset_files(req.dataset_id)
+        if files:
+            in_p = Path(files[0]["file_path"])
+
+    if not in_p or not in_p.exists():
+        raise HTTPException(status_code=400, detail="Valid input point cloud file required")
+
+    out_p = Path(req.output_path or f"./storage_cache/cleaned_{uuid.uuid4().hex[:8]}.las")
+    res = clean_point_cloud(in_p, out_p, method=req.method or "AUTO")
+    return res
+
 
 
 
