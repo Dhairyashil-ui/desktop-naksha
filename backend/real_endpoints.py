@@ -40,6 +40,11 @@ try:
         format_photogrammetry_response,
         SUPPORTED_EXTS as PHOTO_EXTS,
     )
+    from backend.gis_cad_scanner import (
+        scan_gis_cad_dataset,
+        format_gis_cad_response,
+        ALL_GIS_CAD_EXTS,
+    )
 except ImportError:
     from database import engine
     from ingestion import (
@@ -58,6 +63,11 @@ except ImportError:
         scan_photogrammetry_dataset,
         format_photogrammetry_response,
         SUPPORTED_EXTS as PHOTO_EXTS,
+    )
+    from gis_cad_scanner import (
+        scan_gis_cad_dataset,
+        format_gis_cad_response,
+        ALL_GIS_CAD_EXTS,
     )
 
 router = APIRouter(prefix="/api/v2", tags=["real"])
@@ -775,3 +785,332 @@ async def get_photogrammetry_scan_result(dataset_id: str, project_id: str) -> di
         "last_scanned": str(row.updated_at) if row.updated_at else None,
         "manifest": manifest,
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 11 — DEDICATED LiDAR / POINT CLOUD SCAN ENDPOINT
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post("/datasets/{dataset_id}/scan/lidar")
+async def scan_lidar(
+    dataset_id: str,
+    project_id: str,
+) -> dict:
+    """
+    Real LiDAR / Point Cloud dataset scanner.
+
+    Reads every point cloud file in the dataset from disk and performs:
+    - File signature / magic byte validation
+    - Point count (exact, from LAS header or file stream)
+    - Bounding box (XYZ min/max from header or sampled points)
+    - CRS / EPSG (from VLRs, OGC WKT, or XML)
+    - Classification distribution (ASPRS classes 0-18)
+    - RGB colour presence
+    - GPS time presence and intensity statistics
+    - Point density (pts/m²) from bounding box area
+    - Per-file validation: readable, non-empty, valid coords, CRS, density
+
+    Formats supported:
+      LAS 1.0-1.4 / LAZ (via laspy)
+      E57 (binary header + XML section)
+      PLY ASCII and binary
+      XYZ / PTS / TXT (space/comma/tab delimited)
+
+    Returns:
+        category: "LiDAR / Point Cloud"
+        completeness: 0-100 %
+        quality:      0-100 %
+        status:       READY | PARTIAL | REJECTED
+    """
+    from pathlib import Path
+
+    try:
+        from backend.config import settings
+        from backend.lidar_scanner import scan_lidar_dataset, format_lidar_response, LIDAR_EXTS
+    except ImportError:
+        from config import settings
+        from lidar_scanner import scan_lidar_dataset, format_lidar_response, LIDAR_EXTS
+
+    # Resolve file paths from DB
+    with engine.connect() as conn:
+        rows = conn.execute(
+            sql_text("""
+                SELECT df.filename, df.relative_path, df.storage_location
+                FROM dataset_files df
+                WHERE df.dataset_id = :ds_id
+                ORDER BY df.filename
+            """),
+            {"ds_id": dataset_id},
+        ).fetchall()
+
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' has no files")
+
+    base_storage = Path(settings.LOCAL_STORAGE_PATH).resolve()
+    file_paths = []
+    for row in rows:
+        rel = row.relative_path or row.filename
+        p = base_storage / rel
+        if not p.exists() and row.storage_location:
+            p = Path(row.storage_location)
+        if p.exists() and p.suffix.lower() in LIDAR_EXTS:
+            file_paths.append(p)
+
+    if not file_paths:
+        return {
+            "category": "LiDAR / Point Cloud",
+            "completeness": 0.0,
+            "quality": 0.0,
+            "status": "REJECTED",
+            "summary": {"total_files": 0, "readable_files": 0, "total_points": 0},
+            "issues": ["No point cloud files found on disk for this dataset"],
+            "warnings": [],
+            "files": [],
+        }
+
+    report = scan_lidar_dataset(
+        dataset_id=dataset_id,
+        project_id=project_id,
+        file_paths=file_paths,
+    )
+
+    # Persist back to DB
+    val_status = "PASSED" if report.status == "READY" else (
+        "PARTIAL" if report.status == "PARTIAL" else "FAILED"
+    )
+    now = datetime.now(timezone.utc)
+    with engine.connect() as conn:
+        conn.execute(
+            sql_text("""
+                UPDATE input_datasets
+                SET completeness      = :completeness,
+                    quality           = :quality,
+                    status            = CAST(:status AS dataset_status_enum),
+                    validation_status = :val_status,
+                    readiness_score   = :readiness,
+                    epsg_detected     = :epsg,
+                    updated_at        = :now
+                WHERE id = :id
+            """),
+            {
+                "id": dataset_id,
+                "completeness": report.completeness,
+                "quality": report.quality,
+                "status": report.status,
+                "val_status": val_status,
+                "readiness": report.quality,
+                "epsg": report.epsg,
+                "now": now,
+            },
+        )
+        conn.commit()
+
+    return format_lidar_response(report)
+
+
+@router.get("/datasets/{dataset_id}/scan/lidar")
+async def get_lidar_scan_result(dataset_id: str, project_id: str) -> dict:
+    """Returns the last persisted LiDAR scan result. Use POST to trigger a fresh scan."""
+    with engine.connect() as conn:
+        row = conn.execute(
+            sql_text("""
+                SELECT completeness, quality, status, validation_status,
+                       metadata_manifest, updated_at, epsg_detected
+                FROM input_datasets
+                WHERE id = :id
+            """),
+            {"id": dataset_id},
+        ).fetchone()
+
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found")
+
+    manifest = row.metadata_manifest or {}
+    if isinstance(manifest, str):
+        import json as _json
+        manifest = _json.loads(manifest)
+
+    return {
+        "category": "LiDAR / Point Cloud",
+        "completeness": float(row.completeness or 0),
+        "quality": float(row.quality or 0),
+        "status": row.status,
+        "validation_status": row.validation_status,
+        "epsg": row.epsg_detected,
+        "last_scanned": str(row.updated_at) if row.updated_at else None,
+        "manifest": manifest,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 12 — DEDICATED GIS / CAD SCAN ENDPOINT
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post("/datasets/{dataset_id}/scan/gis-cad")
+@router.post("/datasets/{dataset_id}/scan/gis")
+async def scan_gis_cad(
+    dataset_id: str,
+    project_id: str,
+) -> dict:
+    """
+    Real GIS / CAD dataset scanner (Step 12).
+
+    Reads every GIS (SHP, GPKG, GeoJSON, KML) and CAD (DXF, DWG, DGN) file in the
+    dataset from disk and performs individual validation:
+    - Geometry validity (Shapely is_valid + explain_validity reasons)
+    - CRS / EPSG detection & multi-layer consistency
+    - Attribute schema & null field counts
+    - Empty / null features detection
+    - Bounding box computation from coordinates
+    - Topology: self-intersections and sliver polygons
+    - Shapefile companion file inspection (.shx, .dbf, .prj)
+    - DXF entities, layers, blocks, units, and 3D features (ezdxf)
+    - DWG honest rejection (Autodesk proprietary binary)
+    - DGN V7 support (Fiona driver) / V8 notice
+
+    Returns:
+        category: "GIS / CAD"
+        completeness: 0-100 %
+        quality:      0-100 %
+        status:       READY | PARTIAL | REJECTED
+    """
+    from pathlib import Path
+
+    try:
+        from backend.config import settings
+    except ImportError:
+        from config import settings
+
+    # Resolve file paths from DB
+    with engine.connect() as conn:
+        rows = conn.execute(
+            sql_text("""
+                SELECT df.filename, df.relative_path, df.storage_location
+                FROM dataset_files df
+                WHERE df.dataset_id = :ds_id
+                ORDER BY df.filename
+            """),
+            {"ds_id": dataset_id},
+        ).fetchall()
+
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' has no files")
+
+    base_storage = Path(settings.LOCAL_STORAGE_PATH).resolve()
+    file_paths = []
+    for row in rows:
+        rel = row.relative_path or row.filename
+        p = base_storage / rel
+        if not p.exists() and row.storage_location:
+            p = Path(row.storage_location)
+        if p.exists() and p.suffix.lower() in ALL_GIS_CAD_EXTS:
+            file_paths.append(p)
+
+    if not file_paths:
+        return {
+            "category": "GIS / CAD",
+            "completeness": 0.0,
+            "quality": 0.0,
+            "status": "REJECTED",
+            "summary": {"total_files": 0, "readable_files": 0, "total_features": 0},
+            "issues": ["No GIS or CAD files found on disk for this dataset"],
+            "warnings": [],
+            "gis": [],
+            "cad": [],
+        }
+
+    report = scan_gis_cad_dataset(
+        dataset_id=dataset_id,
+        project_id=project_id,
+        file_paths=file_paths,
+    )
+
+    # Persist back to DB
+    val_status = "PASSED" if report.status == "READY" else (
+        "PARTIAL" if report.status == "PARTIAL" else "FAILED"
+    )
+    now = datetime.now(timezone.utc)
+    scanned_at_iso = now.isoformat()
+    manifest_payload = {
+        "scanned_at": scanned_at_iso,
+        "pipeline": "GIS_CAD_REAL_SCANNER_V1",
+        "scanner_module": "gis_cad_scanner",
+        "total_features": report.total_features,
+        "gis_layers": len(report.gis_layers),
+        "cad_layers": len(report.cad_layers),
+        "geometry_types": report.geometry_types,
+        "dominant_epsg": report.dominant_epsg,
+        "consistent_crs": report.consistent_crs,
+        "bbox": report.combined_bbox,
+        "support_matrix": report.support_matrix,
+        "quality_score": report.quality,
+        "completeness_score": report.completeness,
+        "issues": report.issues,
+        "warnings": report.warnings,
+    }
+
+    with engine.connect() as conn:
+        conn.execute(
+            sql_text("""
+                UPDATE input_datasets
+                SET completeness      = :completeness,
+                    quality           = :quality,
+                    status            = CAST(:status AS dataset_status_enum),
+                    validation_status = :val_status,
+                    readiness_score   = :readiness,
+                    epsg_detected     = :epsg,
+                    metadata_manifest = CAST(:manifest AS jsonb),
+                    updated_at        = :now
+                WHERE id = :id
+            """),
+            {
+                "id": dataset_id,
+                "completeness": report.completeness,
+                "quality": report.quality,
+                "status": report.status,
+                "val_status": val_status,
+                "readiness": report.quality,
+                "epsg": report.dominant_epsg,
+                "manifest": json.dumps(manifest_payload),
+                "now": now,
+            },
+        )
+        conn.commit()
+
+    return format_gis_cad_response(report)
+
+
+@router.get("/datasets/{dataset_id}/scan/gis-cad")
+@router.get("/datasets/{dataset_id}/scan/gis")
+async def get_gis_cad_scan_result(dataset_id: str, project_id: str) -> dict:
+    """Returns the last persisted GIS / CAD scan result. Use POST to trigger a fresh scan."""
+    with engine.connect() as conn:
+        row = conn.execute(
+            sql_text("""
+                SELECT completeness, quality, status, validation_status,
+                       metadata_manifest, updated_at, epsg_detected
+                FROM input_datasets
+                WHERE id = :id
+            """),
+            {"id": dataset_id},
+        ).fetchone()
+
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found")
+
+    manifest = row.metadata_manifest or {}
+    if isinstance(manifest, str):
+        import json as _json
+        manifest = _json.loads(manifest)
+
+    return {
+        "category": "GIS / CAD",
+        "completeness": float(row.completeness or 0),
+        "quality": float(row.quality or 0),
+        "status": row.status,
+        "validation_status": row.validation_status,
+        "epsg": row.epsg_detected,
+        "last_scanned": str(row.updated_at) if row.updated_at else None,
+        "manifest": manifest,
+    }
+

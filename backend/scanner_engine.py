@@ -36,6 +36,16 @@ try:
         format_photogrammetry_response,
         SUPPORTED_EXTS as PHOTO_EXTS,
     )
+    from backend.lidar_scanner import (
+        scan_lidar_dataset,
+        format_lidar_response,
+        LIDAR_EXTS,
+    )
+    from backend.gis_cad_scanner import (
+        scan_gis_cad_dataset,
+        format_gis_cad_response,
+        ALL_GIS_CAD_EXTS,
+    )
 except ImportError:
     from config import settings
     from database import engine
@@ -44,6 +54,16 @@ except ImportError:
         scan_photogrammetry_dataset,
         format_photogrammetry_response,
         SUPPORTED_EXTS as PHOTO_EXTS,
+    )
+    from lidar_scanner import (
+        scan_lidar_dataset,
+        format_lidar_response,
+        LIDAR_EXTS,
+    )
+    from gis_cad_scanner import (
+        scan_gis_cad_dataset,
+        format_gis_cad_response,
+        ALL_GIS_CAD_EXTS,
     )
 
 from sqlalchemy import text
@@ -749,7 +769,409 @@ async def run_real_scanner_pipeline(
             scanned_at=scanned_at_iso,
         )
 
-    # ── NON-PHOTOGRAMMETRY: continue with generic pipeline below ──────
+    # ── CAT_02: LiDAR / Point Cloud fast-path (stages 3-10) ─────────────
+    if category_enum == "CAT_02_LIDAR_POINT_CLOUD":
+        pc_paths = [
+            p for _, p in existing_files
+            if p.suffix.lower() in LIDAR_EXTS
+        ]
+        await emit_step(
+            3, "FORMAT_PARSER", "Format parser", "pass",
+            f"Dispatching {len(pc_paths)} file(s) to LiDAR scanner", 30
+        )
+
+        # ── STAGE 4: Real LiDAR scan
+        lidar_report = scan_lidar_dataset(
+            dataset_id=dataset_id,
+            project_id=project_id,
+            file_paths=pc_paths,
+        )
+
+        n_files = lidar_report.readable_files
+        tot_pts = lidar_report.total_points
+        density = lidar_report.combined_density
+        await emit_step(
+            4, "METADATA_EXTRACTION", "Metadata extraction", "pass",
+            f"{n_files} readable files; {tot_pts:,} total points; "
+            f"formats: {lidar_report.format_summary}", 40
+        )
+
+        # ── STAGE 5: CRS
+        if lidar_report.crs_string or lidar_report.epsg:
+            crs_detected = lidar_report.crs_string or f"EPSG:{lidar_report.epsg}"
+            epsg_detected = lidar_report.epsg
+            crs_status = "pass" if lidar_report.consistent_crs else "warning"
+            crs_detail = (
+                f"CRS: {crs_detected}" +
+                (" (consistent)" if lidar_report.consistent_crs else " (INCONSISTENT across files)")
+            )
+        else:
+            crs_detected = None
+            epsg_detected = None
+            crs_status = "warning"
+            crs_detail = "No CRS detected — georeferencing unknown"
+        await emit_step(5, "COORDINATE_CRS_DETECTION", "Coordinate/CRS detection", crs_status, crs_detail, 50)
+
+        # ── STAGE 6: Geometry / bounds
+        bbox = lidar_report.combined_bbox
+        if bbox:
+            dx = bbox["x_max"] - bbox["x_min"]
+            dy = bbox["y_max"] - bbox["y_min"]
+            dz = bbox["z_max"] - bbox["z_min"]
+            area_ha = lidar_report.combined_area_m2 / 10_000
+            geom_detail = (
+                f"Extent: {dx:.2f}×{dy:.2f} m; Z range: {dz:.2f} m; "
+                f"Area: {area_ha:.4f} ha; Density: {density:.2f} pts/m²"
+            )
+        else:
+            geom_detail = "Bounding box unavailable"
+        await emit_step(6, "GEOMETRY_CHECKS", "Geometry checks",
+                        "pass" if bbox else "warning", geom_detail, 60)
+
+        # ── STAGE 7: Dataset requirements
+        reqs_passed = tot_pts > 0 and n_files > 0
+        req_notes = []
+        if tot_pts == 0:    req_notes.append("No points found in dataset")
+        if n_files == 0:    req_notes.append("No readable point cloud files")
+        if lidar_report.issues: req_notes.extend(lidar_report.issues)
+        req_detail = "Requirements met" if reqs_passed else " | ".join(req_notes)
+        await emit_step(7, "DATASET_REQUIREMENTS", "Dataset requirements",
+                        "pass" if reqs_passed else "fail", req_detail, 70)
+
+        # ── STAGE 8: Quality checks
+        quality_score = lidar_report.quality
+        quality_checks = [
+            QualityItemResult(
+                name="File Integrity",
+                status="pass" if lidar_report.readable_files == lidar_report.total_files else "warning",
+                note=f"{lidar_report.readable_files}/{lidar_report.total_files} files readable",
+                metric=f"{lidar_report.readable_files} OK",
+            ),
+            QualityItemResult(
+                name="Point Count",
+                status="pass" if tot_pts > 100_000 else ("warning" if tot_pts > 0 else "fail"),
+                note=f"{tot_pts:,} total points",
+                metric=f"{tot_pts:,} Pts",
+            ),
+            QualityItemResult(
+                name="Point Density",
+                status="pass" if density >= 1.0 else ("warning" if density >= 0.1 else "fail"),
+                note=f"{density:.4f} pts/m²",
+                metric=f"{density:.2f} pts/m²",
+            ),
+            QualityItemResult(
+                name="CRS / Georeferencing",
+                status="pass" if (lidar_report.crs_string or lidar_report.epsg) else "warning",
+                note=crs_detail,
+                metric=f"EPSG:{lidar_report.epsg}" if lidar_report.epsg else "Unknown",
+            ),
+            QualityItemResult(
+                name="Classification",
+                status="pass" if lidar_report.has_classification else "warning",
+                note="ASPRS classification present" if lidar_report.has_classification else "No classification",
+                metric="Classified" if lidar_report.has_classification else "Raw",
+            ),
+            QualityItemResult(
+                name="Attributes",
+                status="pass",
+                note=(f"Intensity: {'Y' if lidar_report.has_intensity else 'N'}  "
+                      f"RGB: {'Y' if lidar_report.has_rgb else 'N'}  "
+                      f"GPS time: {'Y' if lidar_report.has_gps_time else 'N'}"),
+                metric=("Int+RGB" if lidar_report.has_intensity and lidar_report.has_rgb
+                        else "Int" if lidar_report.has_intensity else "Minimal"),
+            ),
+        ]
+        await emit_step(
+            8, "QUALITY_CHECKS", "Quality checks",
+            "pass" if quality_score >= 75 else "warning",
+            f"Quality: {quality_score:.1f}% | Points: {tot_pts:,} | Density: {density:.2f} pts/m²",
+            80
+        )
+
+        # ── STAGE 9: Completeness
+        completeness_score = lidar_report.completeness
+        await emit_step(
+            9, "COMPLETENESS_CALCULATION", "Completeness calculation",
+            "pass" if completeness_score >= 80 else "warning",
+            f"Completeness: {completeness_score:.1f}% "
+            f"({'CRS OK' if lidar_report.crs_string else 'No CRS'}, "
+            f"{'classified' if lidar_report.has_classification else 'unclassified'}, "
+            f"density {density:.2f} pts/m²)",
+            90
+        )
+
+        # ── STAGE 10: Final status + persist
+        dataset_status = lidar_report.status   # READY / PARTIAL / REJECTED
+        val_status = "PASSED" if dataset_status == "READY" else (
+            "PARTIAL" if dataset_status == "PARTIAL" else "FAILED"
+        )
+        ready_for_proc = dataset_status in ("READY", "PARTIAL")
+
+        now = datetime.now(timezone.utc)
+        scanned_at_iso = now.isoformat()
+        manifest_payload = {
+            "scanned_at": scanned_at_iso,
+            "pipeline": "LIDAR_REAL_SCANNER_V1",
+            "scanner_module": "lidar_scanner",
+            "total_files": lidar_report.total_files,
+            "readable_files": n_files,
+            "total_points": tot_pts,
+            "combined_density": round(density, 4),
+            "combined_area_m2": round(lidar_report.combined_area_m2, 1),
+            "format_summary": lidar_report.format_summary,
+            "crs": crs_detected,
+            "epsg": epsg_detected,
+            "bbox": bbox,
+            "has_classification": lidar_report.has_classification,
+            "has_rgb": lidar_report.has_rgb,
+            "has_gps_time": lidar_report.has_gps_time,
+            "has_intensity": lidar_report.has_intensity,
+            "consistent_crs": lidar_report.consistent_crs,
+            "issues": lidar_report.issues,
+            "warnings": lidar_report.warnings,
+            "quality_score": quality_score,
+            "completeness_score": completeness_score,
+        }
+
+        with engine.connect() as conn:
+            conn.execute(text("""
+                UPDATE input_datasets
+                SET status = CAST(:status AS dataset_status_enum),
+                    completeness = :completeness,
+                    quality = :quality,
+                    validation_status = :val_status,
+                    readiness_score = :readiness,
+                    epsg_detected = :epsg,
+                    metadata_manifest = CAST(:manifest AS jsonb),
+                    updated_at = :now
+                WHERE id = :id;
+            """), {
+                "id": dataset_id,
+                "status": dataset_status,
+                "completeness": completeness_score,
+                "quality": quality_score,
+                "val_status": val_status,
+                "readiness": quality_score,
+                "epsg": epsg_detected,
+                "manifest": json.dumps(manifest_payload),
+                "now": now,
+            })
+            conn.execute(text("""
+                INSERT INTO validation_results (
+                    id, dataset_id, accuracy_tier_evaluated, verdict,
+                    readiness_score, required_passed, required_checks,
+                    recommended_checks, quality_metrics, remediation_cards,
+                    evaluated_at
+                ) VALUES (
+                    :id, :dataset_id, 'TIER_1_CADASTRAL_LEGAL', CAST(:verdict AS dataset_status_enum),
+                    :readiness, :req_passed, CAST(:req_checks AS jsonb),
+                    CAST(:rec_checks AS jsonb), CAST(:q_metrics AS jsonb),
+                    '[]'::jsonb, :now
+                );
+            """), {
+                "id": str(__import__("uuid").uuid4()),
+                "dataset_id": dataset_id,
+                "verdict": dataset_status,
+                "readiness": quality_score,
+                "req_passed": reqs_passed,
+                "req_checks": json.dumps([s.dict() for s in steps]),
+                "rec_checks": json.dumps([q.dict() for q in quality_checks]),
+                "q_metrics": json.dumps({"completeness": completeness_score, "quality": quality_score}),
+                "now": now,
+            })
+            conn.commit()
+
+        point_count = tot_pts
+        await emit_step(
+            10, "FINAL_DATASET_STATUS", "Final dataset status", "pass",
+            f"LiDAR — {dataset_status} | "
+            f"Completeness: {completeness_score:.1f}% | Quality: {quality_score:.1f}% | "
+            f"{tot_pts:,} points",
+            100
+        )
+
+        return ScannerPipelineResult(
+            dataset_id=dataset_id,
+            project_id=project_id,
+            category=category_enum,
+            name=dataset_name,
+            status=dataset_status,
+            validation_status=val_status,
+            completeness=completeness_score,
+            quality=quality_score,
+            ready_for_processing=ready_for_proc,
+            crs_detected=crs_detected,
+            epsg=epsg_detected,
+            bbox=bbox,
+            point_count=tot_pts,
+            steps=steps,
+            quality_checks=quality_checks,
+            metadata=manifest_payload,
+            scanned_at=scanned_at_iso,
+        )
+
+    # ── CAT_03: GIS / CAD fast-path (stages 3-10) ───────────────────
+    if category_enum == "CAT_03_GIS_CAD":
+        gis_paths = [
+            p for _, p in existing_files
+            if p.suffix.lower() in ALL_GIS_CAD_EXTS
+        ]
+        await emit_step(
+            3, "FORMAT_PARSER", "Format parser", "pass",
+            f"Dispatching {len(gis_paths)} file(s) to GIS/CAD scanner", 30
+        )
+
+        gis_report = scan_gis_cad_dataset(
+            dataset_id=dataset_id,
+            project_id=project_id,
+            file_paths=gis_paths,
+        )
+
+        n_feats = gis_report.total_features
+        n_layers = len(gis_report.gis_layers) + len(gis_report.cad_layers)
+        await emit_step(
+            4, "METADATA_EXTRACTION", "Metadata extraction", "pass",
+            f"{n_layers} layer(s); {n_feats:,} features; "
+            f"geometry types: {gis_report.geometry_types}", 40
+        )
+
+        crs_detected = f"EPSG:{gis_report.dominant_epsg}" if gis_report.dominant_epsg else None
+        epsg_detected = gis_report.dominant_epsg
+        crs_status = "pass" if gis_report.has_valid_crs else "warning"
+        crs_detail = (
+            crs_detected if crs_detected
+            else "No CRS detected"
+        ) + (" (consistent)" if gis_report.consistent_crs else " (INCONSISTENT)")
+        await emit_step(5, "COORDINATE_CRS_DETECTION", "Coordinate/CRS detection", crs_status, crs_detail, 50)
+
+        bbox = gis_report.combined_bbox
+        geom_detail = (
+            f"bbox: ({bbox['x_min']:.4f},{bbox['y_min']:.4f}) - ({bbox['x_max']:.4f},{bbox['y_max']:.4f})"
+            if bbox else "No bounding box available"
+        )
+        total_invalid = sum(l.invalid_count for l in gis_report.gis_layers)
+        if total_invalid > 0:
+            geom_detail += f"; {total_invalid} invalid geometries"
+        await emit_step(6, "GEOMETRY_CHECKS", "Geometry checks",
+                        "pass" if total_invalid == 0 else "warning", geom_detail, 60)
+
+        reqs_passed = (n_feats > 0 or any(c.entity_count > 0 for c in gis_report.cad_layers))
+        req_detail = "Requirements met" if reqs_passed else "No features or entities found"
+        await emit_step(7, "DATASET_REQUIREMENTS", "Dataset requirements",
+                        "pass" if reqs_passed else "fail", req_detail, 70)
+
+        quality_score = gis_report.quality
+        completeness_score = gis_report.completeness
+        quality_checks = [
+            QualityItemResult(
+                name="Features",
+                status="pass" if n_feats > 0 else "fail",
+                note=f"{n_feats:,} features across {n_layers} layer(s)",
+                metric=f"{n_feats:,} Feats",
+            ),
+            QualityItemResult(
+                name="Geometry Validity",
+                status="pass" if total_invalid == 0 else "warning",
+                note=f"{total_invalid} invalid geometries",
+                metric="Valid" if total_invalid == 0 else f"{total_invalid} Inv",
+            ),
+            QualityItemResult(
+                name="CRS",
+                status="pass" if gis_report.has_valid_crs else "warning",
+                note=crs_detail,
+                metric=f"EPSG:{epsg_detected}" if epsg_detected else "Unknown",
+            ),
+            QualityItemResult(
+                name="Bounding Box",
+                status="pass" if bbox else "warning",
+                note=geom_detail,
+                metric="OK" if bbox else "Missing",
+            ),
+        ]
+        await emit_step(8, "QUALITY_CHECKS", "Quality checks",
+                        "pass" if quality_score >= 75 else "warning",
+                        f"Quality: {quality_score:.1f}% | Features: {n_feats:,}", 80)
+        await emit_step(9, "COMPLETENESS_CALCULATION", "Completeness calculation",
+                        "pass" if completeness_score >= 80 else "warning",
+                        f"Completeness: {completeness_score:.1f}%", 90)
+
+        dataset_status = gis_report.status
+        val_status = "PASSED" if dataset_status == "READY" else (
+            "PARTIAL" if dataset_status == "PARTIAL" else "FAILED"
+        )
+        ready_for_proc = dataset_status in ("READY", "PARTIAL")
+
+        now = datetime.now(timezone.utc)
+        scanned_at_iso = now.isoformat()
+        manifest_payload = {
+            "scanned_at": scanned_at_iso,
+            "pipeline": "GIS_CAD_REAL_SCANNER_V1",
+            "scanner_module": "gis_cad_scanner",
+            "total_features": n_feats,
+            "gis_layers": len(gis_report.gis_layers),
+            "cad_layers": len(gis_report.cad_layers),
+            "geometry_types": gis_report.geometry_types,
+            "dominant_epsg": epsg_detected,
+            "consistent_crs": gis_report.consistent_crs,
+            "bbox": bbox,
+            "quality_score": quality_score,
+            "completeness_score": completeness_score,
+            "issues": gis_report.issues,
+            "warnings": gis_report.warnings,
+        }
+
+        with engine.connect() as conn:
+            conn.execute(text("""
+                UPDATE input_datasets
+                SET status = CAST(:status AS dataset_status_enum),
+                    completeness = :completeness, quality = :quality,
+                    validation_status = :val_status, readiness_score = :readiness,
+                    epsg_detected = :epsg,
+                    metadata_manifest = CAST(:manifest AS jsonb), updated_at = :now
+                WHERE id = :id;
+            """), {
+                "id": dataset_id, "status": dataset_status,
+                "completeness": completeness_score, "quality": quality_score,
+                "val_status": val_status, "readiness": quality_score,
+                "epsg": epsg_detected, "manifest": json.dumps(manifest_payload), "now": now,
+            })
+            conn.execute(text("""
+                INSERT INTO validation_results (
+                    id, dataset_id, accuracy_tier_evaluated, verdict,
+                    readiness_score, required_passed, required_checks,
+                    recommended_checks, quality_metrics, remediation_cards, evaluated_at
+                ) VALUES (
+                    :id, :dataset_id, 'TIER_1_CADASTRAL_LEGAL', CAST(:verdict AS dataset_status_enum),
+                    :readiness, :req_passed, CAST(:req_checks AS jsonb),
+                    CAST(:rec_checks AS jsonb), CAST(:q_metrics AS jsonb), '[]'::jsonb, :now
+                );
+            """), {
+                "id": str(__import__("uuid").uuid4()), "dataset_id": dataset_id,
+                "verdict": dataset_status, "readiness": quality_score,
+                "req_passed": reqs_passed,
+                "req_checks": json.dumps([s.dict() for s in steps]),
+                "rec_checks": json.dumps([q.dict() for q in quality_checks]),
+                "q_metrics": json.dumps({"completeness": completeness_score, "quality": quality_score}),
+                "now": now,
+            })
+            conn.commit()
+
+        feature_count = n_feats
+        await emit_step(10, "FINAL_DATASET_STATUS", "Final dataset status", "pass",
+                        f"GIS/CAD — {dataset_status} | Completeness: {completeness_score:.1f}%"
+                        f" | Quality: {quality_score:.1f}% | {n_feats:,} features", 100)
+
+        return ScannerPipelineResult(
+            dataset_id=dataset_id, project_id=project_id, category=category_enum,
+            name=dataset_name, status=dataset_status, validation_status=val_status,
+            completeness=completeness_score, quality=quality_score,
+            ready_for_processing=ready_for_proc,
+            crs_detected=crs_detected, epsg=epsg_detected, bbox=bbox,
+            feature_count=n_feats, steps=steps, quality_checks=quality_checks,
+            metadata=manifest_payload, scanned_at=scanned_at_iso,
+        )
+
+    # ── NON-PHOTOGRAMMETRY, NON-LIDAR, NON-GIS: generic pipeline ──────
     parsed_structures: List[Dict[str, Any]] = []
     format_errors = 0
 
