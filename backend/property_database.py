@@ -96,83 +96,116 @@ def sync_3d_property_hierarchy_to_db(
     try:
         with engine.connect() as conn:
             # A. Ensure Project
-            conn.execute(
-                text("""
-                    INSERT INTO projects (
-                        id, organization_id, code, title, description, location, status,
-                        accuracy_tier, target_crs_epsg, combined_scale_factor, created_at, updated_at
-                    ) VALUES (
-                        :proj_id, 
-                        (SELECT id FROM organizations LIMIT 1),
-                        'PROJ-PUNE-001',
-                        'Pune Haveli Taluka Residential Cadastre 001',
-                        'Authentic LiDAR, Photogrammetry & Cadastral 3D Property Demarcation',
-                        'Haveli, Pune, Maharashtra',
-                        'ACTIVE',
-                        'TIER_1_CADASTRAL_LEGAL',
-                        32643,
-                        0.9996024,
-                        NOW(),
-                        NOW()
-                    )
-                    ON CONFLICT (id) DO UPDATE SET
-                        title = EXCLUDED.title,
-                        updated_at = NOW()
-                """),
-                {"proj_id": str(proj_uuid)}
-            )
+            existing_proj = conn.execute(
+                text("SELECT id FROM projects WHERE code = 'PROJ-PUNE-001' LIMIT 1")
+            ).fetchone()
+            if existing_proj:
+                proj_id_str = str(existing_proj[0])
+            else:
+                proj_id_str = str(proj_uuid)
+                conn.execute(
+                    text("""
+                        INSERT INTO projects (
+                            id, organization_id, code, title, description, location, status,
+                            accuracy_tier, target_crs_epsg, combined_scale_factor, created_at, updated_at
+                        ) VALUES (
+                            :proj_id, 
+                            (SELECT id FROM organizations LIMIT 1),
+                            'PROJ-PUNE-001',
+                            'Pune Haveli Taluka Residential Cadastre 001',
+                            'Authentic LiDAR, Photogrammetry & Cadastral 3D Property Demarcation',
+                            'Haveli, Pune, Maharashtra',
+                            'ACTIVE',
+                            'TIER_1_CADASTRAL_LEGAL',
+                            32643,
+                            0.9996024,
+                            NOW(),
+                            NOW()
+                        )
+                        ON CONFLICT (id) DO UPDATE SET
+                            title = EXCLUDED.title,
+                            updated_at = NOW()
+                    """),
+                    {"proj_id": proj_id_str}
+                )
 
             # B. Ensure Parcel
-            parcel_uuid = uuid.uuid5(proj_uuid, f"parcel_{base_ulpin}")
-            conn.execute(
-                text("""
-                    INSERT INTO parcels (
-                        id, project_id, ulpin, state_code, district_code, taluka_code, village_code,
-                        survey_number, sub_division_number, land_use, legal_recorded_area_sqm,
-                        gis_computed_area_sqm, area_delta_percentage, geom, created_at, updated_at
-                    ) VALUES (
-                        :parcel_id, :proj_id, :ulpin, '27', '07', '005', '012345',
-                        '142', 'B', 'RESIDENTIAL', 1600.00,
-                        1598.85, 0.072,
-                        ST_SetSRID(ST_Multi(ST_GeomFromText('POLYGON((73.8560 18.5200 542.0, 73.8564 18.5200 542.0, 73.8564 18.5204 542.0, 73.8560 18.5204 542.0, 73.8560 18.5200 542.0))')), 4326),
-                        NOW(), NOW()
-                    )
-                    ON CONFLICT (id) DO UPDATE SET
-                        ulpin = EXCLUDED.ulpin,
-                        updated_at = NOW()
-                """),
-                {"parcel_id": str(parcel_uuid), "proj_id": str(proj_uuid), "ulpin": base_ulpin}
-            )
+            existing_parcel = conn.execute(
+                text("SELECT id FROM parcels WHERE ulpin = :ulpin LIMIT 1"),
+                {"ulpin": base_ulpin}
+            ).fetchone()
+            if existing_parcel:
+                parcel_id_str = str(existing_parcel[0])
+                conn.execute(
+                    text("UPDATE parcels SET project_id = :proj_id, updated_at = NOW() WHERE id = :p_id"),
+                    {"proj_id": proj_id_str, "p_id": parcel_id_str}
+                )
+            else:
+                parcel_id_str = str(uuid.uuid5(uuid.UUID(proj_id_str), f"parcel_{base_ulpin}"))
+                conn.execute(
+                    text("""
+                        INSERT INTO parcels (
+                            id, project_id, ulpin, state_code, district_code, taluka_code, village_code,
+                            survey_number, sub_division_number, land_use, legal_recorded_area_sqm,
+                            gis_computed_area_sqm, area_delta_percentage, geom, created_at, updated_at
+                        ) VALUES (
+                            :parcel_id, :proj_id, :ulpin, '27', '07', '005', '012345',
+                            '142', 'B', 'RESIDENTIAL', 1600.00,
+                            1598.85, 0.072,
+                            ST_SetSRID(ST_Multi(ST_GeomFromText('POLYGON((73.8560 18.5200 542.0, 73.8564 18.5200 542.0, 73.8564 18.5204 542.0, 73.8560 18.5204 542.0, 73.8560 18.5200 542.0))')), 4326),
+                            NOW(), NOW()
+                        )
+                    """),
+                    {"parcel_id": parcel_id_str, "proj_id": proj_id_str, "ulpin": base_ulpin}
+                )
 
             # C. Ensure Building
-            bldg_uuid = uuid.uuid5(parcel_uuid, "building_bldg_001")
             floors_in_manifest = manifest_data.get("floors", []) if manifest_data else []
-            conn.execute(
-                text("""
-                    INSERT INTO buildings (
-                        id, parcel_id, building_code, building_name, structure_type,
-                        floors_above_ground, floors_below_ground, ground_elevation_z,
-                        building_height_meters, footprint_geom, created_at
-                    ) VALUES (
-                        :bldg_id, :parcel_id, 'BLDG-001', 'Shivaji Heights Wing A', 'RCC_RESIDENTIAL',
-                        :fl_count, 0, 542.15,
-                        :bldg_h,
-                        ST_SetSRID(ST_Multi(ST_GeomFromText('POLYGON((73.8561 18.5201 542.15, 73.8563 18.5201 542.15, 73.8563 18.5203 542.15, 73.8561 18.5203 542.15, 73.8561 18.5201 542.15))')), 4326),
-                        NOW()
-                    )
-                    ON CONFLICT (id) DO UPDATE SET
-                        floors_above_ground = EXCLUDED.floors_above_ground,
-                        building_height_meters = EXCLUDED.building_height_meters
-                """),
-                {
-                    "bldg_id": str(bldg_uuid),
-                    "parcel_id": str(parcel_uuid),
-                    "fl_count": len(floors_in_manifest),
-                    "bldg_h": round(len(floors_in_manifest) * 3.0, 2)
-                }
-            )
+            existing_bldg = conn.execute(
+                text("SELECT id FROM buildings WHERE parcel_id = :parcel_id LIMIT 1"),
+                {"parcel_id": parcel_id_str}
+            ).fetchone()
+            if existing_bldg:
+                bldg_id_str = str(existing_bldg[0])
+                conn.execute(
+                    text("""
+                        UPDATE buildings SET
+                            floors_above_ground = :fl_count,
+                            building_height_meters = :bldg_h
+                        WHERE id = :bldg_id
+                    """),
+                    {
+                        "bldg_id": bldg_id_str,
+                        "fl_count": len(floors_in_manifest),
+                        "bldg_h": round(len(floors_in_manifest) * 3.0, 2)
+                    }
+                )
+            else:
+                bldg_id_str = str(uuid.uuid5(uuid.UUID(parcel_id_str), "building_bldg_001"))
+                conn.execute(
+                    text("""
+                        INSERT INTO buildings (
+                            id, parcel_id, building_code, building_name, structure_type,
+                            floors_above_ground, floors_below_ground, ground_elevation_z,
+                            building_height_meters, footprint_geom, created_at
+                        ) VALUES (
+                            :bldg_id, :parcel_id, 'BLDG-001', 'Shivaji Heights Wing A', 'RCC_RESIDENTIAL',
+                            :fl_count, 0, 542.15,
+                            :bldg_h,
+                            ST_SetSRID(ST_Multi(ST_GeomFromText('POLYGON((73.8561 18.5201 542.15, 73.8563 18.5201 542.15, 73.8563 18.5203 542.15, 73.8561 18.5203 542.15, 73.8561 18.5201 542.15))')), 4326),
+                            NOW()
+                        )
+                    """),
+                    {
+                        "bldg_id": bldg_id_str,
+                        "parcel_id": parcel_id_str,
+                        "fl_count": len(floors_in_manifest),
+                        "bldg_h": round(len(floors_in_manifest) * 3.0, 2)
+                    }
+                )
 
             # D. Insert / Update Floors & Units
+            bldg_uuid = uuid.UUID(bldg_id_str)
             for fl in floors_in_manifest:
                 fl_num = int(fl.get("floor_number", 0))
                 fl_label = fl.get("floor_label", f"Floor {fl_num}")
