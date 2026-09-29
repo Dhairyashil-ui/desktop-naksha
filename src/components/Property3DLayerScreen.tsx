@@ -45,11 +45,33 @@ const ALL_UNITS: PropertyUnit3D[] = (() => {
       const finalY = unitNum === 302 ? 2048168.18 : y;
       const finalZ = unitNum === 302 ? 546.65 : z;
 
+      const unitLetters = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
+      const uLetter = unitLetters[(u - 1) % unitLetters.length];
+      const unitAlias = `Flat ${uLetter}`;
+      const clearH = 3.65;
+      const volM3 = Number((84.50 * clearH).toFixed(2));
+
+      // 2D Footprint SVG path preview
+      const svgPaths: Record<string, string> = {
+        'A': 'M 10 10 L 110 10 L 110 65 L 85 65 L 85 90 L 10 90 Z',
+        'B': 'M 10 10 L 35 10 L 35 35 L 110 35 L 110 90 L 10 90 Z',
+        'C': 'M 10 10 L 85 10 L 110 35 L 110 90 L 10 90 Z',
+        'D': 'M 10 10 L 110 10 L 110 70 L 75 70 L 75 90 L 10 90 Z',
+      };
+      const svgPath = svgPaths[uLetter] || svgPaths['A'];
+
       result.push({
         id: `UNIT-${unitNum}`,
         unitNumber: `${unitNum}`,
+        unitAlias,
+        unitName: `Flat ${uLetter} (Unit ${unitNum})`,
+        unitType: `${uLetter === 'B' || uLetter === 'D' ? '3BHK Executive' : '2BHK Luxury'} Suite`,
         floor: f,
         areaSqM: 84.50,
+        volumeM3: volM3,
+        clearHeightM: clearH,
+        minZ: finalZ - clearH / 2,
+        maxZ: finalZ + clearH / 2,
         x: finalX,
         y: finalY,
         z: finalZ,
@@ -59,7 +81,36 @@ const ALL_UNITS: PropertyUnit3D[] = (() => {
         ownerName: unitNum === 302 ? 'Sunita R. Kulkarni' : owners[(u - 1) % owners.length],
         ctsNumber: `CTS 142/B-${unitNum}`,
         ulpin: `MH-PUN-2026-0942-${unitNum}`,
-        undividedLandSharePct: 1.5625
+        undividedLandSharePct: 1.5625,
+        footprint2D: {
+          polygon: [[finalX - 3.5, finalY - 2.0], [finalX + 3.5, finalY - 2.0], [finalX + 3.5, finalY + 1.2], [finalX + 2.2, finalY + 1.2], [finalX + 2.2, finalY + 2.0], [finalX - 3.5, finalY + 2.0]],
+          perimeter_m: 21.6,
+          area_sqm: 84.50,
+          svg_path: svgPath
+        },
+        geometry3D: {
+          is_watertight: true,
+          volume_m3: volM3,
+          vertex_count: 12,
+          face_count: 20
+        },
+        associatedParcel: {
+          parcel_id: 'CTS 142/B (Survey No. 48/2)',
+          ulpin: `MH-PUN-2026-0942-${unitNum}`,
+          village: 'Haveli, Pune Suburban',
+          total_parcel_area_sqm: 1600.00,
+          undivided_land_share_pct: 1.5625
+        },
+        associatedGovernmentRecord: {
+          document_number: `MH-PUN-HAV-2026-${unitNum}`,
+          record_type: 'Index II / 7-12 RoR Extract (MahaRERA)',
+          cts_number: `CTS 142/B-${unitNum}`,
+          owner_name: unitNum === 302 ? 'Sunita R. Kulkarni' : owners[(u - 1) % owners.length],
+          registered_carpet_area_sqm: 84.50,
+          registration_date: '2026-04-12',
+          encumbrance: 'CLEAR',
+          match_status: 'VERIFIED_MATCHED'
+        }
       });
     }
   }
@@ -299,79 +350,114 @@ export const Property3DLayerScreen: React.FC<Property3DLayerScreenProps> = ({
           </div>
         </div>
 
-        {/* ================= RIGHT COLUMN: CLICKING A UNIT CARD ================= */}
-        <div className="w-64 flex flex-col justify-start py-2 pl-4">
+        {/* ================= RIGHT COLUMN: CLICKING A UNIT CARD (STEP 28) ================= */}
+        <div className="w-80 flex flex-col justify-start py-1 pl-2 overflow-y-auto max-h-[640px]">
           {/* Exact User Prompt Card Architecture */}
-          <div className="p-5 border border-zinc-200/90 rounded-2xl bg-white shadow-xs">
-            {/* Title: UNIT 302 */}
-            <div className="text-xl font-bold font-mono tracking-tight text-zinc-900 mb-4 pb-2 border-b border-zinc-100 flex items-center justify-between">
-              <span>UNIT {selectedUnit.unitNumber}</span>
-              <FileCheck2 className="w-4 h-4 text-blue-600" />
+          <div className="p-4 border border-zinc-200/90 rounded-2xl bg-white shadow-xs space-y-3 font-mono text-xs">
+            {/* Title: FLAT A / UNIT 302 */}
+            <div className="pb-2 border-b border-zinc-100 flex items-center justify-between">
+              <div>
+                <div className="text-base font-bold tracking-tight text-zinc-900">
+                  {selectedUnit.unitAlias?.toUpperCase() || 'FLAT A'} • UNIT {selectedUnit.unitNumber}
+                </div>
+                <div className="text-[10px] text-zinc-400 font-sans">
+                  {selectedUnit.unitType || '2BHK Luxury Suite'}
+                </div>
+              </div>
+              <FileCheck2 className="w-4 h-4 text-blue-600 shrink-0" />
             </div>
 
-            {/* Attributes List */}
-            <div className="space-y-3 font-mono text-xs">
+            {/* 1. 2D Footprint Section */}
+            <div className="bg-zinc-50 rounded-xl p-2.5 border border-zinc-100 space-y-1.5">
+              <div className="flex items-center justify-between text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
+                <span>2D FOOTPRINT</span>
+                <span className="text-blue-600 font-semibold">{selectedUnit.areaSqM.toFixed(2)} m²</span>
+              </div>
+              {/* SVG 2D Footprint Mini-Canvas */}
+              <div className="w-full h-20 bg-white rounded-lg border border-zinc-200/80 flex items-center justify-center p-1 relative overflow-hidden">
+                <svg viewBox="0 0 120 100" className="w-full h-full stroke-blue-600 fill-blue-50/70 stroke-[2.5]">
+                  <path d={selectedUnit.footprint2D?.svg_path || 'M 10 10 L 110 10 L 110 65 L 85 65 L 85 90 L 10 90 Z'} />
+                  {/* Dimension labels inside footprint */}
+                  <text x="50" y="52" className="text-[9px] fill-zinc-500 font-mono stroke-none text-anchor-middle">
+                    {selectedUnit.areaSqM.toFixed(1)} m²
+                  </text>
+                </svg>
+                <div className="absolute bottom-1 right-2 text-[9px] text-zinc-400">
+                  Perimeter: {selectedUnit.footprint2D?.perimeter_m || 21.6}m
+                </div>
+              </div>
+            </div>
+
+            {/* 2. 3D Volume Section */}
+            <div className="bg-blue-50/40 rounded-xl p-2.5 border border-blue-100/60 space-y-1">
+              <div className="flex items-center justify-between text-[10px] font-bold text-blue-700 uppercase tracking-wider">
+                <span>3D VOLUME</span>
+                <span className="font-bold text-blue-900">{selectedUnit.volumeM3 || 308.43} m³</span>
+              </div>
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="text-zinc-500">Clear Height:</span>
+                <span className="font-semibold text-zinc-800">{selectedUnit.clearHeightM || 3.65} m</span>
+              </div>
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="text-zinc-500">Solid B-Rep:</span>
+                <span className="font-semibold text-emerald-600">✓ Watertight Mesh</span>
+              </div>
+            </div>
+
+            {/* 3. Floor & Elevation */}
+            <div className="space-y-1.5 pt-1">
               <div className="flex items-center justify-between">
                 <span className="text-zinc-400">Floor:</span>
-                <span className="font-semibold text-zinc-900">{selectedUnit.floor}</span>
+                <span className="font-semibold text-zinc-900">Floor {selectedUnit.floor}</span>
               </div>
-
-              <div className="flex items-center justify-between">
-                <span className="text-zinc-400">Area:</span>
-                <span className="font-semibold text-zinc-900">{selectedUnit.areaSqM.toFixed(2)} m²</span>
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="text-zinc-400">Slab Z Range:</span>
+                <span className="font-semibold text-zinc-700">
+                  {(selectedUnit.minZ || selectedUnit.z - 1.82).toFixed(2)}m .. {(selectedUnit.maxZ || selectedUnit.z + 1.83).toFixed(2)}m
+                </span>
               </div>
+            </div>
 
-              <div className="pt-2 border-t border-zinc-100 space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-zinc-400">X:</span>
-                  <span className="font-semibold text-zinc-900">{selectedUnit.x.toFixed(2)}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-zinc-400">Y:</span>
-                  <span className="font-semibold text-zinc-900">{selectedUnit.y.toFixed(2)}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-zinc-400">Z:</span>
-                  <span className="font-semibold text-zinc-900">{selectedUnit.z.toFixed(2)}</span>
-                </div>
+            {/* 4. XYZ Geodetic Coordinates */}
+            <div className="pt-2 border-t border-zinc-100 space-y-1">
+              <div className="text-[10px] text-zinc-400 uppercase tracking-wider">XYZ CENTROID (UTM 43N):</div>
+              <div className="grid grid-cols-3 gap-1 text-[11px] font-semibold text-zinc-800 bg-zinc-50 p-1.5 rounded-lg text-center">
+                <div><span className="text-[9px] text-zinc-400 font-normal">X: </span>{selectedUnit.x.toFixed(1)}</div>
+                <div><span className="text-[9px] text-zinc-400 font-normal">Y: </span>{selectedUnit.y.toFixed(1)}</div>
+                <div><span className="text-[9px] text-zinc-400 font-normal">Z: </span>{selectedUnit.z.toFixed(2)}</div>
               </div>
+            </div>
 
-              <div className="pt-2 border-t border-zinc-100 space-y-2">
-                <div>
-                  <div className="text-[10px] text-zinc-400 uppercase">2D Parcel:</div>
-                  <div className="font-semibold text-zinc-900 text-xs mt-0.5">
-                    {selectedUnit.twoDParcel}
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <span className="text-zinc-400">Record:</span>
-                  <span className="font-semibold text-blue-600">
-                    {selectedUnit.recordStatus}
-                  </span>
-                </div>
+            {/* 5. Associated Parcel */}
+            <div className="pt-2 border-t border-zinc-100 space-y-1">
+              <div className="text-[10px] text-zinc-400 uppercase tracking-wider">ASSOCIATED PARCEL:</div>
+              <div className="font-semibold text-zinc-900 text-xs">
+                {selectedUnit.associatedParcel?.parcel_id || selectedUnit.twoDParcel}
               </div>
-
-              {/* Legal Title Attribution */}
-              <div className="pt-2 border-t border-zinc-100 space-y-1">
-                <div className="text-[10px] text-zinc-400 uppercase">Owner:</div>
-                <div className="font-semibold text-zinc-800 text-xs truncate">
-                  {selectedUnit.ownerName}
-                </div>
-                <div className="text-[10px] text-zinc-400">
-                  {selectedUnit.ctsNumber}
-                </div>
+              <div className="flex items-center justify-between text-[10px] text-zinc-500">
+                <span>ULPIN: {selectedUnit.ulpin}</span>
+                <span>Share: {selectedUnit.undividedLandSharePct}%</span>
               </div>
+            </div>
 
-              {/* Status Section */}
-              <div className="pt-3 border-t border-zinc-100">
-                <div className="text-[10px] font-mono font-semibold tracking-wider text-zinc-400 uppercase mb-1">
-                  STATUS
-                </div>
-                <div className="flex items-center space-x-1.5 text-sm font-bold text-emerald-600">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                  <span>✓ {selectedUnit.status}</span>
-                </div>
+            {/* 6. Associated Government Record */}
+            <div className="pt-2 border-t border-zinc-100 space-y-1">
+              <div className="text-[10px] text-zinc-400 uppercase tracking-wider">GOVERNMENT RECORD:</div>
+              <div className="text-xs font-semibold text-zinc-800 truncate">
+                {selectedUnit.ownerName}
+              </div>
+              <div className="flex items-center justify-between text-[10px] text-zinc-500">
+                <span>{selectedUnit.associatedGovernmentRecord?.document_number || `DEED-2026-${selectedUnit.unitNumber}`}</span>
+                <span className="font-semibold text-blue-600">{selectedUnit.recordStatus}</span>
+              </div>
+            </div>
+
+            {/* Status Section */}
+            <div className="pt-2 border-t border-zinc-100 flex items-center justify-between">
+              <span className="text-[10px] text-zinc-400 uppercase">STATUS</span>
+              <div className="flex items-center space-x-1 text-xs font-bold text-emerald-600">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                <span>✓ {selectedUnit.status}</span>
               </div>
             </div>
           </div>

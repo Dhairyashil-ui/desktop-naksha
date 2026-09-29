@@ -1951,6 +1951,109 @@ async def detect_floors_endpoint(req: DetectFloorsRequest) -> dict:
     return res
 
 
+# =====================================================================
+# STEP 27 & STEP 28: 3D APARTMENT SPACE & PROPERTY GEOMETRY ENDPOINTS
+# =====================================================================
+
+class BuildApartmentsRequest(BaseModel):
+    survey_cloud_path: str
+    floor_plan_path: Optional[str] = None
+    property_records_path: Optional[str] = None
+    output_dir: Optional[str] = None
+
+
+_LATEST_APARTMENTS_MANIFEST: Optional[dict] = None
+
+
+@router.post("/building/apartments/build")
+async def build_apartments_endpoint(req: BuildApartmentsRequest) -> dict:
+    """
+    Step 27: Build actual apartment/unit geometry from survey data,
+    floor plans, building geometry, and property records.
+    Watertight 3D B-Rep polygonal solids, zero hardcoded boxes.
+    """
+    global _LATEST_APARTMENTS_MANIFEST
+    from backend.apartment_geometry import apartment_engine
+
+    in_p = Path(req.survey_cloud_path)
+    if not in_p.exists():
+        raise HTTPException(status_code=400, detail=f"Survey point cloud not found: {req.survey_cloud_path}")
+
+    fp = Path(req.floor_plan_path) if req.floor_plan_path else None
+    pr = Path(req.property_records_path) if req.property_records_path else None
+    out = Path(req.output_dir) if req.output_dir else None
+
+    manifest = apartment_engine.build_apartments_from_survey(
+        survey_cloud_path=in_p,
+        floor_plan_path=fp,
+        property_records_path=pr,
+        output_dir=out
+    )
+    _LATEST_APARTMENTS_MANIFEST = manifest
+    return manifest
+
+
+@router.get("/building/apartments")
+async def get_building_apartments_endpoint() -> dict:
+    """
+    Returns the current building apartments hierarchy and units catalog.
+    """
+    global _LATEST_APARTMENTS_MANIFEST
+    if _LATEST_APARTMENTS_MANIFEST is not None:
+        return _LATEST_APARTMENTS_MANIFEST
+
+    from backend.apartment_geometry import apartment_engine
+    fused_candidates = list(Path("storage_cache").glob("**/03_fused_point_cloud.las"))
+    if fused_candidates:
+        _LATEST_APARTMENTS_MANIFEST = apartment_engine.build_apartments_from_survey(fused_candidates[0])
+        return _LATEST_APARTMENTS_MANIFEST
+
+    return {
+        "status": "NO_DATA",
+        "message": "Apartments not yet constructed. POST /api/v2/building/apartments/build with survey point cloud."
+    }
+
+
+@router.get("/building/apartments/{unit_id}")
+async def get_apartment_detail_endpoint(unit_id: str) -> dict:
+    """
+    Step 28: 3D Property Space for a specific selected apartment (e.g. FLAT_A, UNIT_101, UNIT_302).
+    Returns:
+    - 2D footprint (polygon coords, perimeter, area, SVG path)
+    - 3D volume (solid mesh, height, volume in m3, watertight status)
+    - floor (floor number, slab elevation, ceiling elevation)
+    - XYZ (centroid, bounding box in project CRS)
+    - associated parcel (CTS / Survey number, ULPIN, land share %)
+    - associated government record (Index II / Deed number, registered owner, registration date, encumbrance)
+    """
+    global _LATEST_APARTMENTS_MANIFEST
+    if _LATEST_APARTMENTS_MANIFEST is None:
+        from backend.apartment_geometry import apartment_engine
+        fused_candidates = list(Path("storage_cache").glob("**/03_fused_point_cloud.las"))
+        if fused_candidates:
+            _LATEST_APARTMENTS_MANIFEST = apartment_engine.build_apartments_from_survey(fused_candidates[0])
+
+    if _LATEST_APARTMENTS_MANIFEST is None:
+        raise HTTPException(status_code=404, detail="No building apartments dataset loaded.")
+
+    target = unit_id.upper().strip().replace(" ", "_")
+
+    for fl in _LATEST_APARTMENTS_MANIFEST.get("floors", []):
+        for u in fl.get("units", []):
+            u_id = u["unit_id"].upper()
+            u_alias = u["unit_alias"].upper()
+            u_num = str(u["unit_number"]).upper()
+            if target in (u_id, u_alias, u_num, f"FLAT_{target}", f"UNIT_{target}") or target == u_alias.replace("FLAT_", ""):
+                return {
+                    "status": "SUCCESS",
+                    "apartment": u,
+                    "building_id": _LATEST_APARTMENTS_MANIFEST.get("building_id", "BLDG_001"),
+                    "building_name": _LATEST_APARTMENTS_MANIFEST.get("building_name", "Surveyed Residential Strata")
+                }
+
+    raise HTTPException(status_code=404, detail=f"Apartment unit '{unit_id}' not found.")
+
+
 
 
 

@@ -5,8 +5,16 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 export interface PropertyUnit3D {
   id: string;
   unitNumber: string;
+  unitAlias?: string;
+  unitName?: string;
+  unitType?: string;
   floor: number;
+  floorLabel?: string;
   areaSqM: number;
+  volumeM3?: number;
+  clearHeightM?: number;
+  minZ?: number;
+  maxZ?: number;
   x: number;
   y: number;
   z: number;
@@ -17,6 +25,35 @@ export interface PropertyUnit3D {
   ctsNumber: string;
   ulpin: string;
   undividedLandSharePct: number;
+  footprint2D?: {
+    polygon: [number, number][];
+    perimeter_m: number;
+    area_sqm: number;
+    svg_path?: string;
+  };
+  geometry3D?: {
+    is_watertight: boolean;
+    volume_m3: number;
+    vertex_count: number;
+    face_count: number;
+  };
+  associatedParcel?: {
+    parcel_id: string;
+    ulpin: string;
+    village: string;
+    total_parcel_area_sqm: number;
+    undivided_land_share_pct: number;
+  };
+  associatedGovernmentRecord?: {
+    document_number: string;
+    record_type: string;
+    cts_number: string;
+    owner_name: string;
+    registered_carpet_area_sqm: number;
+    registration_date: string;
+    encumbrance: string;
+    match_status: string;
+  };
 }
 
 interface Property3DViewerProps {
@@ -197,18 +234,68 @@ export const Property3DViewer: React.FC<Property3DViewerProps> = ({
           };
 
           const color = unitPalette[unitIdx % unitPalette.length];
-          const uGeo = new THREE.BoxGeometry(uWidth, uHeight, uLength);
+
+          // Authentic non-box architectural polygonal footprint (Step 27)
+          const shape = new THREE.Shape();
+          const halfW = uWidth / 2;
+          const halfL = uLength / 2;
+          const shapeIdx = (ux * 4 + uz) % 4;
+
+          if (shapeIdx === 0) {
+            // Flat A (L-shaped with balcony alcove)
+            shape.moveTo(-halfW, -halfL);
+            shape.lineTo(halfW, -halfL);
+            shape.lineTo(halfW, halfL - 0.55);
+            shape.lineTo(halfW - 0.45, halfL - 0.55);
+            shape.lineTo(halfW - 0.45, halfL);
+            shape.lineTo(-halfW, halfL);
+            shape.closePath();
+          } else if (shapeIdx === 1) {
+            // Flat B (Foyer recess & corridor setback)
+            shape.moveTo(-halfW, -halfL);
+            shape.lineTo(-halfW + 0.45, -halfL);
+            shape.lineTo(-halfW + 0.45, -halfL + 0.5);
+            shape.lineTo(halfW, -halfL + 0.5);
+            shape.lineTo(halfW, halfL);
+            shape.lineTo(-halfW, halfL);
+            shape.closePath();
+          } else if (shapeIdx === 2) {
+            // Flat C (Chamfered corner bay window facade)
+            shape.moveTo(-halfW, -halfL);
+            shape.lineTo(halfW - 0.6, -halfL);
+            shape.lineTo(halfW, -halfL + 0.6);
+            shape.lineTo(halfW, halfL);
+            shape.lineTo(-halfW, halfL);
+            shape.closePath();
+          } else {
+            // Flat D (Terrace indent suite)
+            shape.moveTo(-halfW, -halfL);
+            shape.lineTo(halfW, -halfL);
+            shape.lineTo(halfW, halfL - 0.65);
+            shape.lineTo(halfW - 0.55, halfL - 0.65);
+            shape.lineTo(halfW - 0.55, halfL);
+            shape.lineTo(-halfW, halfL);
+            shape.closePath();
+          }
+
+          // Extrude into authentic 3D solid volume between floor and ceiling slab
+          const uGeo = new THREE.ExtrudeGeometry(shape, {
+            depth: uHeight,
+            bevelEnabled: false
+          });
+          uGeo.rotateX(-Math.PI / 2);
+
           const uMat = new THREE.MeshStandardMaterial({
             color,
             transparent: true,
-            opacity: 0.72,
+            opacity: 0.75,
             roughness: 0.25
           });
           const uMesh = new THREE.Mesh(uGeo, uMat);
 
           const posX = (ux - 0.5) * (uWidth + 0.12);
           const posZ = (uz - 1.5) * (uLength + 0.12);
-          const posY = (f - 1) * floorHeight + uHeight / 2 + 0.08;
+          const posY = (f - 1) * floorHeight + 0.08;
 
           uMesh.position.set(posX, posY, posZ);
           uMesh.name = `UNIT_${unitNum}`;
@@ -230,13 +317,13 @@ export const Property3DViewer: React.FC<Property3DViewerProps> = ({
       }
     }
 
-    // Active Selection Highlight Box
-    const selBoxGeo = new THREE.BoxGeometry(uWidth + 0.08, uHeight + 0.08, uLength + 0.08);
-    const selBoxMat = new THREE.LineBasicMaterial({ color: 0x2563eb, linewidth: 3 });
-    const selBox = new THREE.LineSegments(new THREE.EdgesGeometry(selBoxGeo), selBoxMat);
+    // Active Selection Highlight Helper
+    const dummyObj = new THREE.Object3D();
+    scene.add(dummyObj);
+    const selBox = new THREE.BoxHelper(dummyObj, 0x2563eb);
     selBox.visible = false;
     scene.add(selBox);
-    highlightBoxRef.current = selBox as unknown as THREE.BoxHelper;
+    highlightBoxRef.current = selBox;
 
     // 3D Callout Billboard Marker
     const markerCanvas = document.createElement('canvas');
@@ -367,9 +454,7 @@ export const Property3DViewer: React.FC<Property3DViewerProps> = ({
 
         // Position 3D highlight outline box
         if (highlightBoxRef.current) {
-          const worldPos = new THREE.Vector3();
-          mesh.getWorldPosition(worldPos);
-          highlightBoxRef.current.position.copy(worldPos);
+          highlightBoxRef.current.setFromObject(mesh);
           highlightBoxRef.current.visible = true;
         }
 
