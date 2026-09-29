@@ -28,6 +28,8 @@ try:
     )
     from backend.point_cloud_cleaner import clean_point_cloud
     from backend.point_cloud_registration import register_and_fuse_point_clouds
+    from backend.building_reconstruction import generate_real_building_geometry
+    from backend.building_segmentation import segment_point_cloud_kpconv
 except ImportError:
     from lidar_processor import process_lidar_dataset
     from photogrammetry_pipeline import (
@@ -38,6 +40,8 @@ except ImportError:
     )
     from point_cloud_cleaner import clean_point_cloud
     from point_cloud_registration import register_and_fuse_point_clouds
+    from building_reconstruction import generate_real_building_geometry
+    from building_segmentation import segment_point_cloud_kpconv
 
 
 class GDALPDALWorker:
@@ -262,4 +266,36 @@ class AI3DWorker:
             "units_per_floor": units_per_floor,
             "topology_closure_pct": 100.0,
             "status": "COMPLETED"
+        }
+
+    @staticmethod
+    def reconstruct_building_geometry(
+        fused_las_path: str,
+        output_glb_path: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Step 23: Evaluates dataset, dynamically selects Poisson/BPA/AlphaShape,
+        reconstructs surface mesh and exports real building GLB/GLTF.
+        Zero BoxGeometry, zero Math.random(), zero preloaded GLB.
+        """
+        res = generate_real_building_geometry(Path(fused_las_path), Path(output_glb_path) if output_glb_path else None)
+        return {
+            "worker": "AI_3D_Worker",
+            **res
+        }
+
+    @staticmethod
+    def segment_building_kpconv(
+        las_path: str,
+        output_classified_las: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Step 24: KPConv Kernel Point Convolution semantic classification.
+        Identifies Ground, Facade, Roof, Floor Slab, Opening, Structural Column.
+        Does NOT claim apartment boundaries from semantic segmentation.
+        """
+        res = segment_point_cloud_kpconv(Path(las_path), Path(output_classified_las) if output_classified_las else None)
+        return {
+            "worker": "AI_3D_Worker",
+            **res
         }

@@ -1819,6 +1819,69 @@ async def get_scene_layers_endpoint(project_id: Optional[str] = None) -> dict:
     return res
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 23 — REAL BUILDING GEOMETRY RECONSTRUCTION (Mesh -> GLB)
+# ─────────────────────────────────────────────────────────────────────────────
+
+try:
+    from backend.building_reconstruction import generate_real_building_geometry
+    from backend.building_segmentation import segment_point_cloud_kpconv
+except ImportError:
+    from building_reconstruction import generate_real_building_geometry
+    from building_segmentation import segment_point_cloud_kpconv
+
+
+class ReconstructGeometryRequest(BaseModel):
+    input_path: str
+    output_path: Optional[str] = None
+
+
+@router.post("/building/reconstruct-geometry")
+async def reconstruct_building_geometry_endpoint(req: ReconstructGeometryRequest) -> dict:
+    """
+    Step 23: Evaluates dataset, dynamically selects Poisson/BPA/AlphaShape,
+    reconstructs surface mesh and exports real building GLB/GLTF.
+    Zero BoxGeometry, zero Math.random(), zero preloaded GLB.
+    """
+    in_p = Path(req.input_path)
+    if not in_p.exists():
+        raise HTTPException(status_code=400, detail=f"Input point cloud file not found: {req.input_path}")
+
+    out_p = Path(req.output_path) if req.output_path else None
+    res = generate_real_building_geometry(in_p, out_p)
+    return res
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 24 — REAL BUILDING SEGMENTATION (KPConv Semantic Classes)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class SegmentBuildingRequest(BaseModel):
+    input_path: str
+    output_classified_las: Optional[str] = None
+    max_sample_points: Optional[int] = 25000
+
+
+@router.post("/building/segment-kpconv")
+async def segment_building_kpconv_endpoint(req: SegmentBuildingRequest) -> dict:
+    """
+    Step 24: KPConv Kernel Point Convolution semantic classification.
+    Distinguishes Ground, Facade, Roof, Floor Slab, Opening, Structural Column.
+    Strictly observes constraint: DOES NOT claim apartment title boundaries from raw segmentation.
+    """
+    in_p = Path(req.input_path)
+    if not in_p.exists():
+        raise HTTPException(status_code=400, detail=f"Input point cloud file not found: {req.input_path}")
+
+    out_las = Path(req.output_classified_las) if req.output_classified_las else None
+    res = segment_point_cloud_kpconv(
+        in_p,
+        output_classified_las=out_las,
+        max_sample_points=req.max_sample_points or 25000
+    )
+    return res
+
+
 
 
 
