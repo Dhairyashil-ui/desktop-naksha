@@ -59,9 +59,18 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="text-[10px] font-mono bg-slate-800 text-slate-300 px-2 py-0.5 rounded border border-slate-700">
               {project.projectCode}
             </span>
+            {project.status && (
+              <span className="text-[9px] font-mono font-bold bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded border border-emerald-500/30 uppercase">
+                {project.status}
+              </span>
+            )}
           </div>
-          <div className="text-[11px] text-slate-400 flex items-center gap-3">
-            <span>CRS: <strong className="text-slate-300 font-mono">{project.targetCrs}</strong></span>
+          <div className="text-[11px] text-slate-400 flex items-center gap-3 truncate max-w-md">
+            {project.location ? (
+              <span className="truncate">{project.location}</span>
+            ) : (
+              <span>CRS: <strong className="text-slate-300 font-mono">{project.targetCrs}</strong></span>
+            )}
             <span>•</span>
             <span className="flex items-center gap-1 text-emerald-400">
               <ShieldCheck className="w-3 h-3" />

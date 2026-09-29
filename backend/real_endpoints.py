@@ -69,22 +69,44 @@ CATEGORY_DISPLAY = {
 # ─────────────────────────────────────────────────────────────────
 
 class CreateProjectRequest(BaseModel):
-    title: str
+    title: Optional[str] = None
+    name: Optional[str] = None
+    location: Optional[str] = ""
+    survey_date: Optional[str] = None
+    date: Optional[str] = None
+    status: Optional[str] = "ACTIVE"
     code: Optional[str] = None
     description: Optional[str] = ""
     target_crs_epsg: Optional[int] = 32643
     accuracy_tier: Optional[str] = "TIER_1_CADASTRAL_LEGAL"
-    location: Optional[str] = ""
 
 
+@router.post("/projects")
 @router.post("/projects/create")
 async def create_project_real(req: CreateProjectRequest):
     """
-    REAL: Creates a project record in PostgreSQL.
-    Returns the new project_id UUID.
+    REAL: Creates a project record in PostgreSQL projects table.
+    Stores: project name, location, survey date, created_at, status.
+    Returns: new project_id UUID.
     """
     project_id = str(uuid.uuid4())
+    project_name = (req.name or req.title or "Untitled Project").strip()
     code = req.code or f"PROJ-{project_id[:8].upper()}"
+    location = (req.location or "").strip()
+    survey_date_raw = (req.survey_date or req.date or "").strip()
+    status = (req.status or "ACTIVE").strip()
+
+    # Parse survey date safely
+    parsed_date = None
+    if survey_date_raw:
+        for fmt in ("%Y-%m-%d", "%d %b %Y", "%d/%m/%Y", "%m/%d/%Y", "%Y/%m/%d"):
+            try:
+                parsed_date = datetime.strptime(survey_date_raw, fmt).date()
+                break
+            except ValueError:
+                pass
+
+    created_iso = datetime.now(timezone.utc).isoformat()
 
     try:
         with engine.connect() as conn:
@@ -94,19 +116,24 @@ async def create_project_real(req: CreateProjectRequest):
             conn.execute(sql_text("""
                 INSERT INTO projects (
                     id, organization_id, code, title, description,
+                    location, survey_date, status,
                     accuracy_tier, target_crs_epsg, created_at, updated_at
                 ) VALUES (
                     :id, :org_id, :code, :title, :desc,
+                    :location, :survey_date, :status,
                     :tier, :crs, NOW(), NOW()
                 )
             """), {
                 "id": project_id,
                 "org_id": org_id,
                 "code": code,
-                "title": req.title,
-                "desc": req.description or "",
-                "tier": req.accuracy_tier,
-                "crs": req.target_crs_epsg,
+                "title": project_name,
+                "desc": req.description or f"Cadastral survey project in {location}",
+                "location": location,
+                "survey_date": parsed_date,
+                "status": status,
+                "tier": req.accuracy_tier or "TIER_1_CADASTRAL_LEGAL",
+                "crs": req.target_crs_epsg or 32643,
             })
             conn.commit()
     except Exception as e:
@@ -114,18 +141,57 @@ async def create_project_real(req: CreateProjectRequest):
 
     await operation_logger.log(
         category="PROJECT",
-        message=f"Project created: {req.title}",
-        detail=f"ID={project_id}, Code={code}, CRS=EPSG:{req.target_crs_epsg}"
+        message=f"Project created: {project_name}",
+        detail=f"ID={project_id}, Code={code}, Location={location}, Status={status}"
     )
 
     return {
         "success": True,
         "project_id": project_id,
+        "id": project_id,
+        "name": project_name,
+        "title": project_name,
         "code": code,
-        "title": req.title,
-        "target_crs_epsg": req.target_crs_epsg,
-        "accuracy_tier": req.accuracy_tier,
+        "location": location,
+        "survey_date": str(parsed_date) if parsed_date else survey_date_raw,
+        "status": status,
+        "created_at": created_iso,
+        "target_crs_epsg": req.target_crs_epsg or 32643,
+        "accuracy_tier": req.accuracy_tier or "TIER_1_CADASTRAL_LEGAL",
     }
+
+
+@router.get("/projects")
+async def list_projects():
+    """Returns list of real projects from PostgreSQL."""
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(sql_text("""
+                SELECT id, code, title, description, location, survey_date,
+                       status, accuracy_tier, target_crs_epsg, created_at
+                FROM projects
+                ORDER BY created_at DESC;
+            """)).fetchall()
+
+            projects = []
+            for r in rows:
+                projects.append({
+                    "project_id": str(r[0]),
+                    "id": str(r[0]),
+                    "code": r[1],
+                    "title": r[2],
+                    "name": r[2],
+                    "description": r[3],
+                    "location": r[4] or "",
+                    "survey_date": str(r[5]) if r[5] else None,
+                    "status": r[6] or "ACTIVE",
+                    "accuracy_tier": str(r[7]),
+                    "target_crs_epsg": r[8],
+                    "created_at": str(r[9]),
+                })
+            return {"projects": projects, "count": len(projects)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/projects/{project_id}/detail")
@@ -134,8 +200,8 @@ async def get_project_detail(project_id: str):
     try:
         with engine.connect() as conn:
             row = conn.execute(sql_text("""
-                SELECT id, code, title, description, accuracy_tier,
-                       target_crs_epsg, created_at, updated_at
+                SELECT id, code, title, description, location, survey_date,
+                       status, accuracy_tier, target_crs_epsg, created_at, updated_at
                 FROM projects WHERE id = :id
             """), {"id": project_id}).fetchone()
     except Exception as e:
@@ -146,13 +212,18 @@ async def get_project_detail(project_id: str):
 
     return {
         "project_id": str(row[0]),
+        "id": str(row[0]),
         "code": row[1],
         "title": row[2],
+        "name": row[2],
         "description": row[3],
-        "accuracy_tier": str(row[4]),
-        "target_crs_epsg": row[5],
-        "created_at": str(row[6]),
-        "updated_at": str(row[7]),
+        "location": row[4] or "",
+        "survey_date": str(row[5]) if row[5] else None,
+        "status": row[6] or "ACTIVE",
+        "accuracy_tier": str(row[7]),
+        "target_crs_epsg": row[8],
+        "created_at": str(row[9]),
+        "updated_at": str(row[10]),
     }
 
 

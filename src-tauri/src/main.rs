@@ -168,8 +168,7 @@ fn terminate_backend(child_opt: &mut Option<Child>) {
 
         #[cfg(windows)]
         {
-            // taskkill /F /T ensures the entire process tree (uvicorn workers) is terminated
-            let _ = Command::new("taskkill")
+            let _ = Command::new("C:\\Windows\\System32\\taskkill.exe")
                 .args(["/F", "/T", "/PID", &pid.to_string()])
                 .status();
         }
@@ -197,12 +196,15 @@ fn main() {
             get_backend_status
         ])
         .on_window_event(|event| {
-            if let tauri::WindowEvent::Destroyed = event.event() {
-                println!("[TAURI-RUST] Desktop window destroyed. Cleaning up sidecar processes...");
-                let state: State<BackendProcessState> = event.window().state();
-                if let Ok(mut lock) = state.child.lock() {
-                    terminate_backend(&mut lock);
-                };
+            match event.event() {
+                tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed => {
+                    println!("[TAURI-RUST] Window closing. Cleaning up sidecar processes...");
+                    let state: State<BackendProcessState> = event.window().state();
+                    if let Ok(mut lock) = state.child.lock() {
+                        terminate_backend(&mut lock);
+                    };
+                }
+                _ => {}
             }
         })
         .build(tauri::generate_context!())

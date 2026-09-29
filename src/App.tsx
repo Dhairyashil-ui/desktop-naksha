@@ -18,6 +18,7 @@ import { OutputScreen } from './components/OutputScreen';
 import { ArchitectureModal } from './components/ArchitectureModal';
 import { LogPanel } from './components/LogPanel';
 import { ProjectVirtualState, InputChannel, DatasetStatus, DATASET_STATUS_DISPLAY } from './types/naksha';
+import { API_BASE } from './config/api';
 
 
 // Initial Project State matching Phases 0, 1, 2, 3
@@ -160,52 +161,51 @@ export const App: React.FC = () => {
   const [selectedChannel, setSelectedChannel] = useState<InputChannel | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isArchModalOpen, setIsArchModalOpen] = useState(false);
-  const BACKEND = 'http://127.0.0.1:8000';
-
   const handleCreateProject = async (data: { name: string; location: string; date: string }) => {
-    // Try to create a real project in PostgreSQL
+    // Create a real project in PostgreSQL via POST /api/v2/projects
     try {
-      const res = await fetch(`${BACKEND}/api/v2/projects/create`, {
+      const res = await fetch(`${API_BASE}/api/v2/projects`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          name: data.name,
           title: data.name,
           location: data.location,
+          survey_date: data.date,
+          status: 'ACTIVE',
           target_crs_epsg: 32643,
           accuracy_tier: 'TIER_1_CADASTRAL_LEGAL',
         }),
       });
+
       if (res.ok) {
         const created = await res.json();
-        setProjectId(created.project_id);
+        const newId = created.project_id || created.id;
+        setProjectId(newId);
         setProject(prev => ({
           ...prev,
-          projectId: created.project_id,
+          projectId: newId,
           projectCode: created.code,
-          title: created.title,
+          title: created.name || created.title,
+          location: created.location,
+          surveyDate: created.survey_date,
+          status: created.status || 'ACTIVE',
         }));
       } else {
-        // Fallback: update local state only
-        setProject(prev => ({
-          ...prev,
-          projectCode: data.name.toUpperCase().replace(/\s+/g, '_'),
-          title: data.name,
-        }));
+        const err = await res.json().catch(() => ({ detail: 'Project creation failed' }));
+        console.error('Failed to create project in PostgreSQL:', err);
       }
-    } catch {
-      setProject(prev => ({
-        ...prev,
-        projectCode: data.name.toUpperCase().replace(/\s+/g, '_'),
-        title: data.name,
-      }));
+    } catch (e) {
+      console.error('Network error during project creation:', e);
     }
     setCurrentScreen('DATA_INPUTS');
   };
 
   // Refresh live input channels from real database after an upload
   const refreshLiveChannels = useCallback(async () => {
+    if (!projectId) return;
     try {
-      const res = await fetch(`${BACKEND}/api/v2/projects/${projectId}/inputs/live`);
+      const res = await fetch(`${API_BASE}/api/v2/projects/${projectId}/inputs/live`);
       if (!res.ok) return;
       const data = await res.json();
       if (data.channels) {
@@ -263,7 +263,7 @@ export const App: React.FC = () => {
   const handleDispatchPipeline = () => {
     setIsProcessing(true);
     // Dispatch real backend background job to worker queue
-    fetch(`${BACKEND}/api/v2/jobs/dispatch`, { method: 'POST' }).catch(() => {});
+    fetch(`${API_BASE}/api/v2/jobs/dispatch`, { method: 'POST' }).catch(() => {});
 
     // Mark Photogrammetry as Processing
     setInputs(prev => prev.map(item => 

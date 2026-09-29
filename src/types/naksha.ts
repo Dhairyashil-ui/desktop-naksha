@@ -115,6 +115,9 @@ export interface ProjectVirtualState {
   projectId: string;
   projectCode: string;
   title: string;
+  location?: string;
+  surveyDate?: string;
+  status?: string;
   targetCrs: string;
   accuracyTier: AccuracyTier;
   channels: InputChannel[];

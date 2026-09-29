@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { ArrowLeft, Check, Upload, AlertTriangle, Loader2 } from 'lucide-react';
+import { API_BASE } from '../config/api';
 
 interface CategoryUploadScreenProps {
   categoryName: string;
@@ -37,8 +38,6 @@ export const CategoryUploadScreen: React.FC<CategoryUploadScreenProps> = ({
   const [uploadState, setUploadState] = useState<UploadState>({ status: 'idle', progress: 0 });
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const BACKEND = 'http://127.0.0.1:8000';
-
   const humanSize = (bytes: number) => {
     if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
     return `${(bytes / 1024).toFixed(0)} KB`;
@@ -75,7 +74,7 @@ export const CategoryUploadScreen: React.FC<CategoryUploadScreenProps> = ({
 
     try {
       // Upload files
-      const uploadUrl = `${BACKEND}/api/v2/projects/${projectId}/datasets/${categoryId}/upload`;
+      const uploadUrl = `${API_BASE}/api/v2/projects/${projectId}/datasets/${categoryId}/upload`;
       const uploadRes = await fetch(uploadUrl, {
         method: 'POST',
         body: formData,
@@ -99,7 +98,7 @@ export const CategoryUploadScreen: React.FC<CategoryUploadScreenProps> = ({
 
       // Run real file validation
       const validateRes = await fetch(
-        `${BACKEND}/api/v2/datasets/${uploadData.dataset_id}/validate`,
+        `${API_BASE}/api/v2/datasets/${uploadData.dataset_id}/validate`,
         { method: 'POST' }
       );
 
