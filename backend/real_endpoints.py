@@ -45,6 +45,11 @@ try:
         format_gis_cad_response,
         ALL_GIS_CAD_EXTS,
     )
+    from backend.gnss_scanner import (
+        scan_gnss_dataset,
+        format_gnss_response,
+        ALL_GNSS_EXTS,
+    )
 except ImportError:
     from database import engine
     from ingestion import (
@@ -68,6 +73,11 @@ except ImportError:
         scan_gis_cad_dataset,
         format_gis_cad_response,
         ALL_GIS_CAD_EXTS,
+    )
+    from gnss_scanner import (
+        scan_gnss_dataset,
+        format_gnss_response,
+        ALL_GNSS_EXTS,
     )
 
 router = APIRouter(prefix="/api/v2", tags=["real"])
@@ -1113,4 +1123,178 @@ async def get_gis_cad_scan_result(dataset_id: str, project_id: str) -> dict:
         "last_scanned": str(row.updated_at) if row.updated_at else None,
         "manifest": manifest,
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 13 — DEDICATED GNSS / SURVEY SCAN ENDPOINT
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post("/datasets/{dataset_id}/scan/gnss")
+async def scan_gnss(
+    dataset_id: str,
+    project_id: str,
+) -> dict:
+    """
+    Real GNSS / Survey dataset scanner (Step 13).
+
+    Reads every GNSS file in the dataset from disk:
+    - RINEX (2.x & 3.x/4.x observation & navigation)
+    - NMEA 0183 (GGA, RMC, GSA, GSV, GST)
+    - CSV survey exports (Trimble, Leica, Topcon, Emlid Reach)
+    - TXT / RTKLIB .pos solution files
+
+    Extracts & Validates:
+    - Coordinates (ECEF XYZ, Geodetic Lat/Lon/Height, Projected Easting/Northing)
+    - Timestamps (First/Last obs, epochs, duration, interval)
+    - Satellite observations (GPS, GLONASS, Galileo, BeiDou, PRN counts)
+    - Trajectories & Control points (GCPs / benchmarks)
+    - Accuracy statistics (RTK Fix ratio, 1-sigma RMS, HDOP/PDOP)
+    - Reference system (WGS84 EPSG:4326, ECEF EPSG:4978, UTM Grid)
+
+    Returns:
+        category: "GNSS / Survey"
+        completeness: 0-100 %
+        quality:      0-100 %
+        status:       READY | PARTIAL | REJECTED
+    """
+    from pathlib import Path
+
+    try:
+        from backend.config import settings
+    except ImportError:
+        from config import settings
+
+    # Resolve file paths from DB
+    with engine.connect() as conn:
+        rows = conn.execute(
+            sql_text("""
+                SELECT df.filename, df.relative_path, df.storage_location
+                FROM dataset_files df
+                WHERE df.dataset_id = :ds_id
+                ORDER BY df.filename
+            """),
+            {"ds_id": dataset_id},
+        ).fetchall()
+
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' has no files")
+
+    base_storage = Path(settings.LOCAL_STORAGE_PATH).resolve()
+    file_paths = []
+    for row in rows:
+        rel = row.relative_path or row.filename
+        p = base_storage / rel
+        if not p.exists() and row.storage_location:
+            p = Path(row.storage_location)
+        if p.exists() and p.suffix.lower() in ALL_GNSS_EXTS:
+            file_paths.append(p)
+
+    if not file_paths:
+        return {
+            "category": "GNSS / Survey",
+            "completeness": 0.0,
+            "quality": 0.0,
+            "status": "REJECTED",
+            "summary": {"total_files": 0, "readable_files": 0, "total_points": 0},
+            "issues": ["No GNSS or Survey files found on disk for this dataset"],
+            "warnings": [],
+            "files": [],
+        }
+
+    report = scan_gnss_dataset(
+        dataset_id=dataset_id,
+        project_id=project_id,
+        file_paths=file_paths,
+    )
+
+    # Persist back to DB
+    val_status = "PASSED" if report.status == "READY" else (
+        "PARTIAL" if report.status == "PARTIAL" else "FAILED"
+    )
+    now = datetime.now(timezone.utc)
+    scanned_at_iso = now.isoformat()
+    manifest_payload = {
+        "scanned_at": scanned_at_iso,
+        "pipeline": "GNSS_REAL_SCANNER_V1",
+        "scanner_module": "gnss_scanner",
+        "total_points": report.total_points,
+        "total_epochs": report.total_epochs,
+        "control_points_count": len(report.control_points),
+        "trajectories_count": len(report.trajectories),
+        "constellations": report.constellations_present,
+        "dominant_epsg": report.dominant_epsg,
+        "crs": report.crs_string,
+        "bbox": report.combined_bbox,
+        "mean_accuracy": report.mean_accuracy,
+        "fix_quality_percent": report.overall_fix_quality,
+        "quality_score": report.quality,
+        "completeness_score": report.completeness,
+        "issues": report.issues,
+        "warnings": report.warnings,
+    }
+
+    with engine.connect() as conn:
+        conn.execute(
+            sql_text("""
+                UPDATE input_datasets
+                SET completeness      = :completeness,
+                    quality           = :quality,
+                    status            = CAST(:status AS dataset_status_enum),
+                    validation_status = :val_status,
+                    readiness_score   = :readiness,
+                    epsg_detected     = :epsg,
+                    metadata_manifest = CAST(:manifest AS jsonb),
+                    updated_at        = :now
+                WHERE id = :id
+            """),
+            {
+                "id": dataset_id,
+                "completeness": report.completeness,
+                "quality": report.quality,
+                "status": report.status,
+                "val_status": val_status,
+                "readiness": report.quality,
+                "epsg": report.dominant_epsg,
+                "manifest": json.dumps(manifest_payload),
+                "now": now,
+            },
+        )
+        conn.commit()
+
+    return format_gnss_response(report)
+
+
+@router.get("/datasets/{dataset_id}/scan/gnss")
+async def get_gnss_scan_result(dataset_id: str, project_id: str) -> dict:
+    """Returns the last persisted GNSS / Survey scan result. Use POST to trigger a fresh scan."""
+    with engine.connect() as conn:
+        row = conn.execute(
+            sql_text("""
+                SELECT completeness, quality, status, validation_status,
+                       metadata_manifest, updated_at, epsg_detected
+                FROM input_datasets
+                WHERE id = :id
+            """),
+            {"id": dataset_id},
+        ).fetchone()
+
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found")
+
+    manifest = row.metadata_manifest or {}
+    if isinstance(manifest, str):
+        import json as _json
+        manifest = _json.loads(manifest)
+
+    return {
+        "category": "GNSS / Survey",
+        "completeness": float(row.completeness or 0),
+        "quality": float(row.quality or 0),
+        "status": row.status,
+        "validation_status": row.validation_status,
+        "epsg": row.epsg_detected,
+        "last_scanned": str(row.updated_at) if row.updated_at else None,
+        "manifest": manifest,
+    }
+
 

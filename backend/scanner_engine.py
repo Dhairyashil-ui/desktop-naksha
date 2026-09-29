@@ -46,6 +46,11 @@ try:
         format_gis_cad_response,
         ALL_GIS_CAD_EXTS,
     )
+    from backend.gnss_scanner import (
+        scan_gnss_dataset,
+        format_gnss_response,
+        ALL_GNSS_EXTS,
+    )
 except ImportError:
     from config import settings
     from database import engine
@@ -64,6 +69,11 @@ except ImportError:
         scan_gis_cad_dataset,
         format_gis_cad_response,
         ALL_GIS_CAD_EXTS,
+    )
+    from gnss_scanner import (
+        scan_gnss_dataset,
+        format_gnss_response,
+        ALL_GNSS_EXTS,
     )
 
 from sqlalchemy import text
@@ -1168,6 +1178,176 @@ async def run_real_scanner_pipeline(
             ready_for_processing=ready_for_proc,
             crs_detected=crs_detected, epsg=epsg_detected, bbox=bbox,
             feature_count=n_feats, steps=steps, quality_checks=quality_checks,
+            metadata=manifest_payload, scanned_at=scanned_at_iso,
+        )
+
+    # ── CAT_04: GNSS / Survey fast-path (stages 3-10) ───────────────
+    if category_enum == "CAT_04_GNSS_SURVEY":
+        gnss_paths = [
+            p for _, p in existing_files
+            if p.suffix.lower() in ALL_GNSS_EXTS
+        ]
+        await emit_step(
+            3, "FORMAT_PARSER", "Format parser", "pass",
+            f"Dispatching {len(gnss_paths)} file(s) to GNSS/Survey scanner", 30
+        )
+
+        gnss_report = scan_gnss_dataset(
+            dataset_id=dataset_id,
+            project_id=project_id,
+            file_paths=gnss_paths,
+        )
+
+        n_pts = gnss_report.total_points
+        n_epochs = gnss_report.total_epochs
+        constellations_str = ", ".join(gnss_report.constellations_present) or "Unknown"
+        await emit_step(
+            4, "METADATA_EXTRACTION", "Metadata extraction", "pass",
+            f"{len(gnss_report.files)} file(s); {n_pts:,} points; {n_epochs:,} epochs; "
+            f"constellations: {constellations_str}", 40
+        )
+
+        crs_detected = gnss_report.crs_string
+        epsg_detected = gnss_report.dominant_epsg
+        crs_status = "pass" if epsg_detected else "warning"
+        await emit_step(5, "COORDINATE_CRS_DETECTION", "Coordinate/CRS detection", crs_status, crs_detected, 50)
+
+        bbox = gnss_report.combined_bbox
+        if bbox and "lat_min" in bbox:
+            geom_detail = f"bbox: ({bbox['lat_min']:.6f}, {bbox['lon_min']:.6f}) - ({bbox['lat_max']:.6f}, {bbox['lon_max']:.6f})"
+        elif bbox and "x_min" in bbox:
+            geom_detail = f"grid bbox: ({bbox['x_min']:.2f}, {bbox['y_min']:.2f}) - ({bbox['x_max']:.2f}, {bbox['y_max']:.2f})"
+        else:
+            geom_detail = "No bounding box available"
+
+        n_ctrl = len(gnss_report.control_points)
+        n_traj = len(gnss_report.trajectories)
+        geom_detail += f" | {n_ctrl} control points, {n_traj} trajectories"
+        await emit_step(6, "GEOMETRY_CHECKS", "Geometry checks",
+                        "pass" if bbox else "warning", geom_detail, 60)
+
+        reqs_passed = (n_pts > 0 or n_epochs > 0 or n_ctrl > 0)
+        req_detail = f"Requirements met ({n_pts} points / {n_ctrl} GCPs)" if reqs_passed else "No GNSS observations found"
+        await emit_step(7, "DATASET_REQUIREMENTS", "Dataset requirements",
+                        "pass" if reqs_passed else "fail", req_detail, 70)
+
+        quality_score = gnss_report.quality
+        completeness_score = gnss_report.completeness
+
+        h_rms = gnss_report.mean_accuracy.get("horizontal_rms_m")
+        v_rms = gnss_report.mean_accuracy.get("vertical_rms_m")
+        acc_metric = f"±{h_rms*1000:.1f}mm H" if h_rms and h_rms < 0.1 else (f"±{h_rms:.2f}m" if h_rms else "Unspecified")
+
+        quality_checks = [
+            QualityItemResult(
+                name="Observations",
+                status="pass" if (n_pts > 0 or n_epochs > 0) else "fail",
+                note=f"{n_pts:,} points / {n_epochs:,} epochs across {len(gnss_report.files)} file(s)",
+                metric=f"{n_pts:,} Pts",
+            ),
+            QualityItemResult(
+                name="Constellations",
+                status="pass" if len(gnss_report.constellations_present) >= 2 else "warning",
+                note=f"Tracked: {constellations_str}",
+                metric=f"{len(gnss_report.constellations_present)} Constellations",
+            ),
+            QualityItemResult(
+                name="Accuracy",
+                status="pass" if (h_rms and h_rms <= 0.05) else "warning",
+                note=f"H-RMS: {h_rms}m, V-RMS: {v_rms}m" if h_rms else "No 1-sigma covariance",
+                metric=acc_metric,
+            ),
+            QualityItemResult(
+                name="Reference System",
+                status="pass" if epsg_detected else "warning",
+                note=crs_detected,
+                metric=f"EPSG:{epsg_detected}" if epsg_detected else "Unknown",
+            ),
+        ]
+
+        await emit_step(8, "QUALITY_CHECKS", "Quality checks",
+                        "pass" if quality_score >= 75 else "warning",
+                        f"Quality: {quality_score:.1f}% | Precision: {acc_metric}", 80)
+        await emit_step(9, "COMPLETENESS_CALCULATION", "Completeness calculation",
+                        "pass" if completeness_score >= 80 else "warning",
+                        f"Completeness: {completeness_score:.1f}%", 90)
+
+        dataset_status = gnss_report.status
+        val_status = "PASSED" if dataset_status == "READY" else (
+            "PARTIAL" if dataset_status == "PARTIAL" else "FAILED"
+        )
+        ready_for_proc = dataset_status in ("READY", "PARTIAL")
+
+        now = datetime.now(timezone.utc)
+        scanned_at_iso = now.isoformat()
+        manifest_payload = {
+            "scanned_at": scanned_at_iso,
+            "pipeline": "GNSS_REAL_SCANNER_V1",
+            "scanner_module": "gnss_scanner",
+            "total_points": n_pts,
+            "total_epochs": n_epochs,
+            "control_points_count": n_ctrl,
+            "trajectories_count": n_traj,
+            "constellations": gnss_report.constellations_present,
+            "dominant_epsg": epsg_detected,
+            "crs": crs_detected,
+            "bbox": bbox,
+            "mean_accuracy": gnss_report.mean_accuracy,
+            "fix_quality_percent": gnss_report.overall_fix_quality,
+            "quality_score": quality_score,
+            "completeness_score": completeness_score,
+            "issues": gnss_report.issues,
+            "warnings": gnss_report.warnings,
+        }
+
+        with engine.connect() as conn:
+            conn.execute(text("""
+                UPDATE input_datasets
+                SET status = CAST(:status AS dataset_status_enum),
+                    completeness = :completeness, quality = :quality,
+                    validation_status = :val_status, readiness_score = :readiness,
+                    epsg_detected = :epsg,
+                    metadata_manifest = CAST(:manifest AS jsonb), updated_at = :now
+                WHERE id = :id;
+            """), {
+                "id": dataset_id, "status": dataset_status,
+                "completeness": completeness_score, "quality": quality_score,
+                "val_status": val_status, "readiness": quality_score,
+                "epsg": epsg_detected, "manifest": json.dumps(manifest_payload), "now": now,
+            })
+            conn.execute(text("""
+                INSERT INTO validation_results (
+                    id, dataset_id, accuracy_tier_evaluated, verdict,
+                    readiness_score, required_passed, required_checks,
+                    recommended_checks, quality_metrics, remediation_cards, evaluated_at
+                ) VALUES (
+                    :id, :dataset_id, 'TIER_1_CADASTRAL_LEGAL', CAST(:verdict AS dataset_status_enum),
+                    :readiness, :req_passed, CAST(:req_checks AS jsonb),
+                    CAST(:rec_checks AS jsonb), CAST(:q_metrics AS jsonb), '[]'::jsonb, :now
+                );
+            """), {
+                "id": str(__import__("uuid").uuid4()), "dataset_id": dataset_id,
+                "verdict": dataset_status, "readiness": quality_score,
+                "req_passed": reqs_passed,
+                "req_checks": json.dumps([s.dict() for s in steps]),
+                "rec_checks": json.dumps([q.dict() for q in quality_checks]),
+                "q_metrics": json.dumps({"completeness": completeness_score, "quality": quality_score}),
+                "now": now,
+            })
+            conn.commit()
+
+        feature_count = n_pts
+        await emit_step(10, "FINAL_DATASET_STATUS", "Final dataset status", "pass",
+                        f"GNSS — {dataset_status} | Completeness: {completeness_score:.1f}%"
+                        f" | Quality: {quality_score:.1f}% | {n_pts:,} points", 100)
+
+        return ScannerPipelineResult(
+            dataset_id=dataset_id, project_id=project_id, category=category_enum,
+            name=dataset_name, status=dataset_status, validation_status=val_status,
+            completeness=completeness_score, quality=quality_score,
+            ready_for_processing=ready_for_proc,
+            crs_detected=crs_detected, epsg=epsg_detected, bbox=bbox,
+            feature_count=n_pts, steps=steps, quality_checks=quality_checks,
             metadata=manifest_payload, scanned_at=scanned_at_iso,
         )
 
