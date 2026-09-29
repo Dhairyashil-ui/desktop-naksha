@@ -1,0 +1,170 @@
+{
+  "generated_at": "2026-09-29T20:09:13.813676Z",
+  "python_version": "3.12.10 (tags/v3.12.10:0cc8128, Apr  8 2025, 12:21:36) [MSC v.1943 64 bit (AMD64)]",
+  "platform": "win32",
+  "libraries": {
+    "gdal": {
+      "status": "ok",
+      "version": "3.12.4",
+      "notes": [
+        "Available via rasterio's bundled GDAL binaries",
+        "Functional test: created + read 64x64 GeoTIFF in memory",
+        "Verified CRS EPSG:4326, band count, array shape"
+      ],
+      "capabilities": [
+        "GeoTIFF read/write",
+        "CRS handling",
+        "Raster I/O",
+        "In-memory VFS"
+      ],
+      "error": null
+    },
+    "pdal": {
+      "status": "partial",
+      "version": "N/A",
+      "notes": [
+        "PDAL Python bindings require compiled native PDAL (no Windows pip wheel available)",
+        "LAS/LAZ point cloud processing available via laspy 2.x instead",
+        "laspy v2.7.0 covers PDAL primary use case for this project",
+        "PDAL CLI available if installed via OSGeo4W or conda"
+      ],
+      "capabilities": [
+        "LAS/LAZ via laspy",
+        "Manual pipeline via subprocess if PDAL CLI installed"
+      ],
+      "error": null
+    },
+    "laspy": {
+      "status": "ok",
+      "version": "2.7.0",
+      "notes": [
+        "Functional test: wrote+read 1000 synthetic LAS 1.4 points",
+        "Point format 6, verified intensity + XYZ round-trip"
+      ],
+      "capabilities": [
+        "LAS 1.0-1.4 read/write",
+        "Point format 0-10",
+        "LAZ compression (if lazrs installed)",
+        "Chunked reading"
+      ],
+      "error": null
+    },
+    "pyproj": {
+      "status": "ok",
+      "version": "3.8.0",
+      "notes": [
+        "Round-trip WGS84<>UTM Zone 44N: lon error=0.00e+00, lat error=3.55e-15",
+        "PROJ data version: 9.8.1"
+      ],
+      "capabilities": [
+        "CRS transformation",
+        "EPSG lookup",
+        "Datum shifting",
+        "Authority codes",
+        "WKT parsing"
+      ],
+      "error": null
+    },
+    "shapely": {
+      "status": "ok",
+      "version": "2.1.2",
+      "notes": [
+        "Functional test: Point distance, buffer, intersection, WKT round-trip",
+        "Intersection area: 1.0000 (expected 1.0)"
+      ],
+      "capabilities": [
+        "2D/3D geometry",
+        "Boolean ops",
+        "WKT/WKB I/O",
+        "Spatial predicates",
+        "Buffering"
+      ],
+      "error": null
+    },
+    "rasterio": {
+      "status": "ok",
+      "version": "1.5.1",
+      "notes": [
+        "GDAL version: 3.12.4",
+        "Functional test: 128x128 raster reprojected WGS84->UTM Zone 44N",
+        "Output shape: 134x127"
+      ],
+      "capabilities": [
+        "GeoTIFF/JPEG2000/PNG read+write",
+        "CRS reprojection",
+        "Band math",
+        "Window reads",
+        "COG support"
+      ],
+      "error": null
+    },
+    "fiona": {
+      "status": "ok",
+      "version": "1.10.1",
+      "notes": [
+        "Functional test: wrote 2 Point features to GeoPackage, read back + verified",
+        "Supported drivers count: 20"
+      ],
+      "capabilities": [
+        "Shapefile/GeoPackage/GeoJSON I/O",
+        "CRS-aware vector I/O",
+        "Schema-driven writes",
+        "Streaming reads"
+      ],
+      "error": null
+    },
+    "geopandas": {
+      "status": "ok",
+      "version": "1.2.0",
+      "notes": [
+        "Functional test: 5 Indian cities GeoDataFrame",
+        "Reprojected WGS84->UTM, 50km buffer, back-projected",
+        "Buffer intersections found: 0"
+      ],
+      "capabilities": [
+        "GeoDataFrame ops",
+        "CRS reprojection",
+        "Spatial join/overlay",
+        "Dissolve/clip",
+        "Vector file I/O"
+      ],
+      "error": null
+    },
+    "open3d": {
+      "status": "ok",
+      "version": "0.19.0",
+      "notes": [
+        "Functional test: 5000 random points -> voxel downsampled to 3840",
+        "Estimated surface normals, computed AABB bounding box",
+        "AABB extent: [np.float64(1.0), np.float64(1.0), np.float64(1.0)]"
+      ],
+      "capabilities": [
+        "Point cloud creation/manipulation",
+        "Voxel downsampling",
+        "Normal estimation",
+        "KD-tree search",
+        "ICP registration",
+        "3D visualization"
+      ],
+      "error": null
+    }
+  },
+  "summary": {
+    "ok": [
+      "gdal",
+      "laspy",
+      "pyproj",
+      "shapely",
+      "rasterio",
+      "fiona",
+      "geopandas",
+      "open3d"
+    ],
+    "partial": [
+      "pdal"
+    ],
+    "errors": [],
+    "total": 9,
+    "ready": 9
+  }
+}

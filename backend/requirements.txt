@@ -8,8 +8,19 @@ python-multipart>=0.0.9
 psycopg2-binary>=2.9.9
 sqlalchemy>=2.0.28
 geoalchemy2>=0.14.4
-shapely>=2.0.3
-numpy>=1.26.4
-minio>=7.2.5
 websockets>=12.0
 requests>=2.31.0
+
+# ── Geospatial Processing Stack (Step 9 — verified 2026-09-30) ──────────────
+# GDAL 3.12.4 is bundled with rasterio — no separate install needed
+rasterio>=1.5.1          # GeoTIFF/raster I/O, CRS reprojection, GDAL bindings
+fiona>=1.10.1            # Vector I/O (Shapefile, GeoPackage, GeoJSON)
+geopandas>=1.2.0         # GeoDataFrame, spatial ops, dissolve/overlay/clip
+shapely>=2.1.2           # Geometry (Point, Polygon, intersection, buffer, WKT)
+pyproj>=3.8.0            # CRS transformations, EPSG lookup, datum shifting
+laspy>=2.7.0             # LAS/LAZ 1.0-1.4 point cloud read/write (PDAL substitute)
+open3d>=0.19.0           # 3D point cloud processing, normals, ICP, visualisation
+numpy>=2.0.0             # Required by rasterio 1.5.x
+
+# PDAL: no Windows pip wheel — use laspy for LAS/LAZ. Install via OSGeo4W/conda
+# if native PDAL pipeline execution is required in production.
