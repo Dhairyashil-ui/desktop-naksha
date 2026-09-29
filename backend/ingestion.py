@@ -81,7 +81,7 @@ async def store_uploaded_files(
     Saves uploaded files to local storage, computes SHA-256, registers in database.
     Returns dataset metadata dict.
     """
-    dataset_id = f"ds_{uuid.uuid4().hex[:12]}"
+    dataset_id = str(uuid.uuid4())
     dest_dir = _get_storage_path(project_id, category_id, dataset_id)
     dest_dir.mkdir(parents=True, exist_ok=True)
 
@@ -241,7 +241,7 @@ def get_dataset_files(dataset_id: str) -> List[Dict[str, Any]]:
     try:
         with engine.connect() as conn:
             rows = conn.execute(text("""
-                SELECT file_name, file_path, file_size_bytes, mime_type, sha256_hash, created_at
+                SELECT file_name, relative_path, size_bytes, mime_type, sha256, created_at
                 FROM dataset_files
                 WHERE dataset_id = :id
                 ORDER BY file_name
