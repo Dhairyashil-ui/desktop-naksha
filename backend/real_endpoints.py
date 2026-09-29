@@ -35,6 +35,11 @@ try:
     from backend.file_validator import validate_dataset_by_id
     from backend.operation_logger import operation_logger, LogLevel
     from backend.scanner_engine import run_real_scanner_pipeline, ScannerPipelineResult
+    from backend.photogrammetry_scanner import (
+        scan_photogrammetry_dataset,
+        format_photogrammetry_response,
+        SUPPORTED_EXTS as PHOTO_EXTS,
+    )
 except ImportError:
     from database import engine
     from ingestion import (
@@ -49,6 +54,11 @@ except ImportError:
     from file_validator import validate_dataset_by_id
     from operation_logger import operation_logger, LogLevel
     from scanner_engine import run_real_scanner_pipeline, ScannerPipelineResult
+    from photogrammetry_scanner import (
+        scan_photogrammetry_dataset,
+        format_photogrammetry_response,
+        SUPPORTED_EXTS as PHOTO_EXTS,
+    )
 
 router = APIRouter(prefix="/api/v2", tags=["real"])
 
@@ -616,4 +626,152 @@ async def get_live_project_readiness(project_id: str):
         "processing_ready": overall >= 70 and required_pct >= 75,
         "category_scores": cat_scores,
         "live": True,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 10 — DEDICATED PHOTOGRAMMETRY SCAN ENDPOINT
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post("/datasets/{dataset_id}/scan/photogrammetry")
+async def scan_photogrammetry(
+    dataset_id: str,
+    project_id: str,
+) -> dict:
+    """
+    Real photogrammetry dataset scanner.
+
+    Reads every image file in the dataset from disk and performs:
+    - Image readability check (magic bytes + rasterio decode)
+    - Dimensions (width × height, megapixels)
+    - Full EXIF extraction (all IFD0 + ExifIFD tags)
+    - Camera information (Make, Model, FocalLength, FNumber)
+    - GPS coordinates (lat/lon/alt from GPS IFD, DMS → decimal)
+    - Blur score (Laplacian variance on full-resolution downsampled thumbnail)
+    - Exposure analysis (EV = log2(F²/t), ISO, shutter speed)
+    - Duplicate detection (64-bit dHash, Hamming distance ≤ 8 = duplicate)
+    - Overlap estimation (GPS + FOV-based footprint model)
+    - Coverage area (convex hull of GPS positions, in m²)
+
+    Returns:
+        category: "Photogrammetry"
+        completeness: 0–100 %  (real, based on image count, GPS, overlap)
+        quality:      0–100 %  (real, penalised for blur/exposure/duplicates)
+        status:       READY | PARTIAL | REJECTED
+    """
+    from pathlib import Path
+
+    try:
+        from backend.config import settings
+    except ImportError:
+        from config import settings
+
+    # Resolve image paths from DB
+    with engine.connect() as conn:
+        rows = conn.execute(
+            sql_text("""
+                SELECT df.filename, df.relative_path, df.storage_location
+                FROM dataset_files df
+                WHERE df.dataset_id = :ds_id
+                ORDER BY df.filename
+            """),
+            {"ds_id": dataset_id},
+        ).fetchall()
+
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' has no files")
+
+    base_storage = Path(settings.LOCAL_STORAGE_PATH).resolve()
+    image_paths = []
+    for row in rows:
+        rel = row.relative_path or row.filename
+        p = base_storage / rel
+        if not p.exists() and row.storage_location:
+            p = Path(row.storage_location)
+        if p.exists() and p.suffix.lower() in PHOTO_EXTS:
+            image_paths.append(p)
+
+    if not image_paths:
+        return {
+            "category": "Photogrammetry",
+            "completeness": 0.0,
+            "quality": 0.0,
+            "status": "REJECTED",
+            "summary": {"total_images": 0, "readable_images": 0},
+            "issues": ["No image files found on disk for this dataset"],
+            "warnings": [],
+            "images": [],
+        }
+
+    report = scan_photogrammetry_dataset(
+        dataset_id=dataset_id,
+        project_id=project_id,
+        image_paths=image_paths,
+    )
+
+    # Persist completeness + quality + status back to DB
+    val_status = "PASSED" if report.status == "READY" else (
+        "PARTIAL" if report.status == "PARTIAL" else "FAILED"
+    )
+    now = datetime.now(timezone.utc)
+    with engine.connect() as conn:
+        conn.execute(
+            sql_text("""
+                UPDATE input_datasets
+                SET completeness      = :completeness,
+                    quality           = :quality,
+                    status            = CAST(:status AS dataset_status_enum),
+                    validation_status = :val_status,
+                    readiness_score   = :readiness,
+                    updated_at        = :now
+                WHERE id = :id
+            """),
+            {
+                "id": dataset_id,
+                "completeness": report.completeness,
+                "quality": report.quality,
+                "status": report.status,
+                "val_status": val_status,
+                "readiness": report.quality,
+                "now": now,
+            },
+        )
+        conn.commit()
+
+    return format_photogrammetry_response(report)
+
+
+@router.get("/datasets/{dataset_id}/scan/photogrammetry")
+async def get_photogrammetry_scan_result(dataset_id: str, project_id: str) -> dict:
+    """
+    Returns the last persisted photogrammetry scan result from the DB.
+    Use POST to trigger a fresh scan.
+    """
+    with engine.connect() as conn:
+        row = conn.execute(
+            sql_text("""
+                SELECT completeness, quality, status, validation_status,
+                       metadata_manifest, updated_at
+                FROM input_datasets
+                WHERE id = :id
+            """),
+            {"id": dataset_id},
+        ).fetchone()
+
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found")
+
+    manifest = row.metadata_manifest or {}
+    if isinstance(manifest, str):
+        import json as _json
+        manifest = _json.loads(manifest)
+
+    return {
+        "category": "Photogrammetry",
+        "completeness": float(row.completeness or 0),
+        "quality": float(row.quality or 0),
+        "status": row.status,
+        "validation_status": row.validation_status,
+        "last_scanned": str(row.updated_at) if row.updated_at else None,
+        "manifest": manifest,
     }

@@ -31,10 +31,20 @@ try:
     from backend.config import settings
     from backend.database import engine
     from backend.dataset_model import infer_file_role, get_dataset_model
+    from backend.photogrammetry_scanner import (
+        scan_photogrammetry_dataset,
+        format_photogrammetry_response,
+        SUPPORTED_EXTS as PHOTO_EXTS,
+    )
 except ImportError:
     from config import settings
     from database import engine
     from dataset_model import infer_file_role, get_dataset_model
+    from photogrammetry_scanner import (
+        scan_photogrammetry_dataset,
+        format_photogrammetry_response,
+        SUPPORTED_EXTS as PHOTO_EXTS,
+    )
 
 from sqlalchemy import text
 
@@ -493,8 +503,253 @@ async def run_real_scanner_pipeline(
     )
 
     # =================================================================
-    # STAGE 3: Format parser
+    # STAGE 3: Format parser  +  PHOTOGRAMMETRY FAST-PATH
     # =================================================================
+    # ── PHOTOGRAMMETRY: delegate stages 3-10 to dedicated scanner ─────
+    if category_enum == "CAT_01_PHOTOGRAMMETRY":
+        image_paths = [
+            p for _, p in existing_files
+            if p.suffix.lower() in PHOTO_EXTS
+        ]
+        await emit_step(
+            3, "FORMAT_PARSER", "Format parser", "pass",
+            f"Dispatching {len(image_paths)} image(s) to photogrammetry scanner", 30
+        )
+
+        # ── STAGE 4: Real photogrammetry scan (EXIF, blur, GPS, overlap)
+        photo_report = scan_photogrammetry_dataset(
+            dataset_id=dataset_id,
+            project_id=project_id,
+            image_paths=image_paths,
+        )
+
+        n_img = photo_report.readable_images
+        gps_n = photo_report.images_with_gps
+        cam   = photo_report.dominant_camera or "Unknown camera"
+        await emit_step(
+            4, "METADATA_EXTRACTION", "Metadata extraction", "pass",
+            f"{n_img} readable images; {photo_report.images_with_exif} with EXIF; "
+            f"{gps_n} with GPS; Camera: {cam}", 40
+        )
+
+        # ── STAGE 5: CRS detection from GPS positions
+        if photo_report.gps_positions:
+            crs_detected = "EPSG:4326 (WGS 84 — EXIF GPS)"
+            epsg_detected = 4326
+            crs_status = "pass"
+            crs_detail = (
+                f"GPS coordinates detected in {gps_n}/{n_img} images "
+                f"({gps_n/max(n_img,1)*100:.0f}% coverage)"
+            )
+        else:
+            crs_detected = "EPSG:4326 (Assumed WGS 84 — no embedded GPS)"
+            epsg_detected = 4326
+            crs_status = "warning"
+            crs_detail = "No GPS tags found — CRS assumed WGS 84"
+        await emit_step(5, "COORDINATE_CRS_DETECTION", "Coordinate/CRS detection", crs_status, crs_detail, 50)
+
+        # ── STAGE 6: Geometry / coverage
+        bbox = None
+        if photo_report.gps_positions:
+            lats = [p[0] for p in photo_report.gps_positions]
+            lons = [p[1] for p in photo_report.gps_positions]
+            alts = [p[2] for p in photo_report.gps_positions]
+            bbox = {
+                "x_min": min(lons), "x_max": max(lons),
+                "y_min": min(lats), "y_max": max(lats),
+                "z_min": min(alts), "z_max": max(alts),
+            }
+            area_ha = photo_report.coverage_area_m2 / 10_000
+            geom_detail = (
+                f"GPS footprint: {area_ha:.2f} ha; "
+                f"Overlap estimate: {photo_report.estimated_overlap_pct:.0f}%"
+            )
+        else:
+            geom_detail = "No GPS — spatial footprint unavailable"
+        await emit_step(6, "GEOMETRY_CHECKS", "Geometry checks",
+                        "pass" if bbox else "warning", geom_detail, 60)
+
+        # ── STAGE 7: Dataset requirements
+        req_notes = []
+        reqs_passed = True
+        if n_img < 3:
+            reqs_passed = False
+            req_notes.append(f"Only {n_img} readable images (minimum 3 required)")
+        if photo_report.blurry_count / max(n_img, 1) > 0.5:
+            req_notes.append(f"{photo_report.blurry_count} blurry images > 50%")
+        if not photo_report.images_with_exif:
+            req_notes.append("No EXIF metadata found")
+        if photo_report.issues:
+            reqs_passed = False
+            req_notes.extend(photo_report.issues)
+        req_detail = "Requirements met" if reqs_passed else " | ".join(req_notes)
+        await emit_step(7, "DATASET_REQUIREMENTS", "Dataset requirements",
+                        "pass" if reqs_passed else "fail", req_detail, 70)
+
+        # ── STAGE 8: Quality checks
+        quality_score = photo_report.quality
+        quality_checks = [
+            QualityItemResult(
+                name="Image Readability",
+                status="pass" if photo_report.readable_images == photo_report.total_images else "warning",
+                note=f"{photo_report.readable_images}/{photo_report.total_images} images readable",
+                metric=f"{photo_report.readable_images} OK",
+            ),
+            QualityItemResult(
+                name="Blur",
+                status="pass" if photo_report.blurry_count == 0 else ("warning" if photo_report.blurry_count < n_img * 0.3 else "fail"),
+                note=f"{photo_report.blurry_count} blurry images",
+                metric=f"{photo_report.blurry_count} Blurry",
+            ),
+            QualityItemResult(
+                name="Exposure",
+                status="pass" if (photo_report.overexposed_count + photo_report.underexposed_count) == 0 else "warning",
+                note=f"{photo_report.overexposed_count} overexposed, {photo_report.underexposed_count} underexposed",
+                metric="OK" if (photo_report.overexposed_count + photo_report.underexposed_count) == 0 else "Adjust",
+            ),
+            QualityItemResult(
+                name="Duplicates",
+                status="pass" if photo_report.duplicate_count == 0 else "warning",
+                note=f"{photo_report.duplicate_count} duplicate images",
+                metric=f"{photo_report.duplicate_count} Dups",
+            ),
+            QualityItemResult(
+                name="GPS Coverage",
+                status="pass" if gps_n / max(n_img, 1) >= 0.8 else ("warning" if gps_n > 0 else "fail"),
+                note=f"{gps_n}/{n_img} images georeferenced",
+                metric=f"{gps_n/max(n_img,1)*100:.0f}% GPS",
+            ),
+            QualityItemResult(
+                name="Overlap",
+                status="pass" if photo_report.overlap_feasible else "warning",
+                note=f"Estimated overlap: {photo_report.estimated_overlap_pct:.0f}%",
+                metric=f"{photo_report.estimated_overlap_pct:.0f}%",
+            ),
+        ]
+        await emit_step(
+            8, "QUALITY_CHECKS", "Quality checks",
+            "pass" if quality_score >= 75 else "warning",
+            f"Quality: {quality_score:.1f}% | Blur: {photo_report.blurry_count} | "
+            f"Dups: {photo_report.duplicate_count} | Overlap: {photo_report.estimated_overlap_pct:.0f}%",
+            80
+        )
+
+        # ── STAGE 9: Completeness
+        completeness_score = photo_report.completeness
+        await emit_step(
+            9, "COMPLETENESS_CALCULATION", "Completeness calculation",
+            "pass" if completeness_score >= 80 else "warning",
+            f"Completeness: {completeness_score:.1f}% ({n_img} images, "
+            f"{gps_n} GPS, {'overlap OK' if photo_report.overlap_feasible else 'overlap low'})",
+            90
+        )
+
+        # ── STAGE 10: Final status + persist
+        dataset_status = photo_report.status   # READY / PARTIAL / REJECTED
+        val_status = "PASSED" if dataset_status == "READY" else (
+            "PARTIAL" if dataset_status == "PARTIAL" else "FAILED"
+        )
+        ready_for_proc = dataset_status in ("READY", "PARTIAL")
+
+        now = datetime.now(timezone.utc)
+        scanned_at_iso = now.isoformat()
+        manifest_payload = {
+            "scanned_at": scanned_at_iso,
+            "pipeline": "PHOTOGRAMMETRY_REAL_SCANNER_V1",
+            "scanner_module": "photogrammetry_scanner",
+            "image_count": n_img,
+            "images_with_gps": gps_n,
+            "images_with_exif": photo_report.images_with_exif,
+            "dominant_camera": photo_report.dominant_camera,
+            "blurry_count": photo_report.blurry_count,
+            "duplicate_count": photo_report.duplicate_count,
+            "overlap_pct": photo_report.estimated_overlap_pct,
+            "coverage_area_m2": photo_report.coverage_area_m2,
+            "crs": crs_detected,
+            "epsg": epsg_detected,
+            "bbox": bbox,
+            "issues": photo_report.issues,
+            "warnings": photo_report.warnings,
+            "quality_score": quality_score,
+            "completeness_score": completeness_score,
+        }
+
+        with engine.connect() as conn:
+            conn.execute(text("""
+                UPDATE input_datasets
+                SET status = CAST(:status AS dataset_status_enum),
+                    completeness = :completeness,
+                    quality = :quality,
+                    validation_status = :val_status,
+                    readiness_score = :readiness,
+                    epsg_detected = :epsg,
+                    metadata_manifest = CAST(:manifest AS jsonb),
+                    updated_at = :now
+                WHERE id = :id;
+            """), {
+                "id": dataset_id,
+                "status": dataset_status,
+                "completeness": completeness_score,
+                "quality": quality_score,
+                "val_status": val_status,
+                "readiness": quality_score,
+                "epsg": epsg_detected,
+                "manifest": json.dumps(manifest_payload),
+                "now": now,
+            })
+            conn.execute(text("""
+                INSERT INTO validation_results (
+                    id, dataset_id, accuracy_tier_evaluated, verdict,
+                    readiness_score, required_passed, required_checks,
+                    recommended_checks, quality_metrics, remediation_cards,
+                    evaluated_at
+                ) VALUES (
+                    :id, :dataset_id, 'TIER_1_CADASTRAL_LEGAL', CAST(:verdict AS dataset_status_enum),
+                    :readiness, :req_passed, CAST(:req_checks AS jsonb),
+                    CAST(:rec_checks AS jsonb), CAST(:q_metrics AS jsonb),
+                    '[]'::jsonb, :now
+                );
+            """), {
+                "id": str(__import__("uuid").uuid4()),
+                "dataset_id": dataset_id,
+                "verdict": dataset_status,
+                "readiness": quality_score,
+                "req_passed": reqs_passed,
+                "req_checks": json.dumps([s.dict() for s in steps]),
+                "rec_checks": json.dumps([q.dict() for q in quality_checks]),
+                "q_metrics": json.dumps({"completeness": completeness_score, "quality": quality_score}),
+                "now": now,
+            })
+            conn.commit()
+
+        await emit_step(
+            10, "FINAL_DATASET_STATUS", "Final dataset status", "pass",
+            f"Photogrammetry — {dataset_status} | "
+            f"Completeness: {completeness_score:.1f}% | Quality: {quality_score:.1f}%",
+            100
+        )
+
+        return ScannerPipelineResult(
+            dataset_id=dataset_id,
+            project_id=project_id,
+            category=category_enum,
+            name=dataset_name,
+            status=dataset_status,
+            validation_status=val_status,
+            completeness=completeness_score,
+            quality=quality_score,
+            ready_for_processing=ready_for_proc,
+            crs_detected=crs_detected,
+            epsg=epsg_detected,
+            bbox=bbox,
+            image_count=n_img,
+            steps=steps,
+            quality_checks=quality_checks,
+            metadata=manifest_payload,
+            scanned_at=scanned_at_iso,
+        )
+
+    # ── NON-PHOTOGRAMMETRY: continue with generic pipeline below ──────
     parsed_structures: List[Dict[str, Any]] = []
     format_errors = 0
 
