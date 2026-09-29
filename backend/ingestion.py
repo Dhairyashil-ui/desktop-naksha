@@ -148,7 +148,6 @@ async def store_uploaded_files(
     now = datetime.now(timezone.utc)
     try:
         with engine.connect() as conn:
-            # Upsert input_dataset record
             conn.execute(text("""
                 INSERT INTO input_datasets (
                     id, project_id, survey_id, category, name,
@@ -156,11 +155,11 @@ async def store_uploaded_files(
                     metadata_manifest, created_at, updated_at
                 ) VALUES (
                     :id, :project_id, :survey_id, :category, :name,
-                    'UPLOADED', 0.0, :total_bytes, :file_count,
+                    'SCANNING', 0.0, :total_bytes, :file_count,
                     CAST(:manifest AS jsonb), :now, :now
                 )
                 ON CONFLICT (id) DO UPDATE SET
-                    status = 'UPLOADED',
+                    status = 'SCANNING',
                     total_size_bytes = EXCLUDED.total_size_bytes,
                     file_count = EXCLUDED.file_count,
                     updated_at = EXCLUDED.updated_at
@@ -182,22 +181,28 @@ async def store_uploaded_files(
 
             # Register each file in dataset_files table
             for f in saved_files:
+                ext = Path(f["filename"]).suffix.lower()
                 conn.execute(text("""
                     INSERT INTO dataset_files (
-                        id, dataset_id, file_name, file_path,
-                        file_size_bytes, mime_type, sha256_hash, created_at
+                        id, dataset_id, relative_path, file_name,
+                        extension, file_role, mime_type, size_bytes,
+                        sha256, s3_bucket, s3_key, is_corrupt, created_at
                     ) VALUES (
-                        :id, :dataset_id, :filename, :path,
-                        :size, :mime, :sha256, :now
+                        :id, :dataset_id, :rel_path, :filename,
+                        :ext, 'RAW_DATA', :mime, :size,
+                        :sha256, :bucket, :s3_key, false, :now
                     )
                 """), {
                     "id": str(uuid.uuid4()),
                     "dataset_id": dataset_id,
+                    "rel_path": f["relative_path"],
                     "filename": f["filename"],
-                    "path": f["relative_path"],
-                    "size": f["size_bytes"],
+                    "ext": ext,
                     "mime": f["mime_type"],
+                    "size": f["size_bytes"],
                     "sha256": f["sha256"],
+                    "bucket": settings.STORAGE_BUCKET,
+                    "s3_key": f["relative_path"],
                     "now": now,
                 })
             conn.commit()

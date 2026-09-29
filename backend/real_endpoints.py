@@ -88,16 +88,20 @@ async def create_project_real(req: CreateProjectRequest):
 
     try:
         with engine.connect() as conn:
+            org_row = conn.execute(sql_text("SELECT id FROM organizations LIMIT 1")).fetchone()
+            org_id = str(org_row[0]) if org_row else "a0000000-0000-0000-0000-000000000001"
+
             conn.execute(sql_text("""
                 INSERT INTO projects (
-                    id, code, title, description,
+                    id, organization_id, code, title, description,
                     accuracy_tier, target_crs_epsg, created_at, updated_at
                 ) VALUES (
-                    :id, :code, :title, :desc,
+                    :id, :org_id, :code, :title, :desc,
                     :tier, :crs, NOW(), NOW()
                 )
             """), {
                 "id": project_id,
+                "org_id": org_id,
                 "code": code,
                 "title": req.title,
                 "desc": req.description or "",
