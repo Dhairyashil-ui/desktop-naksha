@@ -30,6 +30,8 @@ try:
     from backend.point_cloud_registration import register_and_fuse_point_clouds
     from backend.building_reconstruction import generate_real_building_geometry
     from backend.building_segmentation import segment_point_cloud_kpconv
+    from backend.randla_net_segmentation import segment_fused_cloud_randla
+    from backend.floor_detector import detect_floor_levels_from_survey
 except ImportError:
     from lidar_processor import process_lidar_dataset
     from photogrammetry_pipeline import (
@@ -42,6 +44,8 @@ except ImportError:
     from point_cloud_registration import register_and_fuse_point_clouds
     from building_reconstruction import generate_real_building_geometry
     from building_segmentation import segment_point_cloud_kpconv
+    from randla_net_segmentation import segment_fused_cloud_randla
+    from floor_detector import detect_floor_levels_from_survey
 
 
 class GDALPDALWorker:
@@ -202,57 +206,40 @@ class AI3DWorker:
     name = "AI_3D_Worker"
 
     @staticmethod
-    def detect_floors(las_path: str, min_floor_height_m: float = 2.8) -> Dict[str, Any]:
+    def detect_floors(las_path: str, floor_plan_path: Optional[str] = None, min_floor_height_m: float = 2.4) -> Dict[str, Any]:
         """
-        Analyzes real vertical elevation histogram of building point cloud.
-        Detects floor slab density peaks instead of using hardcoded intervals.
+        Step 26: Real floor detection engine.
+        Replaces mocked z_min + i * 3.0 calculation.
+        Combines 1D Z-KDE density profile, horizontal RANSAC planar fitting,
+        and window opening inversion to determine real floor levels and Z ranges.
         """
-        import laspy
-
         in_p = Path(las_path).resolve()
-        las = laspy.read(str(in_p))
-        z = np.array(las.z)
-        if len(z) == 0:
-            raise ValueError("Point cloud has 0 points")
-
-        z_min, z_max = float(np.min(z)), float(np.max(z))
-        total_height = z_max - z_min
-
-        # Compute elevation histogram to locate floor slabs
-        bins = max(5, int(total_height / 0.5))
-        hist, bin_edges = np.histogram(z, bins=bins)
-        # Slabs create density spikes
-        slab_elevations = []
-        for i in range(1, len(hist) - 1):
-            if hist[i] > hist[i - 1] and hist[i] > hist[i + 1] and hist[i] > np.mean(hist):
-                elev = (bin_edges[i] + bin_edges[i + 1]) / 2.0
-                if not slab_elevations or (elev - slab_elevations[-1]) >= min_floor_height_m:
-                    slab_elevations.append(round(float(elev), 2))
-
-        if not slab_elevations:
-            # Fallback to height division if continuous vertical walls
-            num_floors = max(1, int(round(total_height / 3.0)))
-            floor_h = total_height / num_floors
-            slab_elevations = [round(z_min + (i * floor_h), 2) for i in range(num_floors)]
-
-        floors = []
-        for idx in range(len(slab_elevations)):
-            f_z_min = slab_elevations[idx]
-            f_z_max = slab_elevations[idx + 1] if idx + 1 < len(slab_elevations) else round(z_max, 2)
-            floors.append({
-                "floor_number": idx,
-                "label": f"Floor {idx}" if idx > 0 else "Ground Floor (Plinth)",
-                "z_min": f_z_min,
-                "z_max": f_z_max,
-                "height_m": round(f_z_max - f_z_min, 2),
-            })
-
+        fp = Path(floor_plan_path) if floor_plan_path else None
+        res = detect_floor_levels_from_survey(in_p, floor_plan_path=fp, min_floor_clearance_m=min_floor_height_m)
         return {
             "worker": "AI_3D_Worker",
-            "building_height_m": round(total_height, 2),
-            "floors_detected": len(floors),
-            "floor_list": floors,
-            "status": "COMPLETED"
+            "floors_detected": res["floors_detected_count"],
+            **res
+        }
+
+    @staticmethod
+    def segment_randla_net(
+        fused_las_path: str,
+        output_classified_las: Optional[str] = None,
+        max_eval_points: int = 30000
+    ) -> Dict[str, Any]:
+        """
+        Step 25: RandLA-Net semantic point cloud understanding.
+        Extracts Ground Datum, Facade Shell, Roof Crown, Floor Slabs, Openings, Columns.
+        """
+        res = segment_fused_cloud_randla(
+            Path(fused_las_path),
+            Path(output_classified_las) if output_classified_las else None,
+            max_eval_points=max_eval_points
+        )
+        return {
+            "worker": "AI_3D_Worker",
+            **res
         }
 
     @staticmethod

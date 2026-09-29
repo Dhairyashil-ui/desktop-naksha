@@ -1882,6 +1882,75 @@ async def segment_building_kpconv_endpoint(req: SegmentBuildingRequest) -> dict:
     return res
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 25 — REAL SEMANTIC UNDERSTANDING (RandLA-Net)
+# ─────────────────────────────────────────────────────────────────────────────
+
+try:
+    from backend.randla_net_segmentation import segment_fused_cloud_randla
+    from backend.floor_detector import detect_floor_levels_from_survey
+except ImportError:
+    from randla_net_segmentation import segment_fused_cloud_randla
+    from floor_detector import detect_floor_levels_from_survey
+
+
+class SegmentRandLARequest(BaseModel):
+    input_path: str
+    output_classified_las: Optional[str] = None
+    max_eval_points: Optional[int] = 30000
+
+
+@router.post("/building/segment-randla")
+async def segment_building_randla_endpoint(req: SegmentRandLARequest) -> dict:
+    """
+    Step 25: RandLA-Net semantic point cloud understanding for large-scale fused scans.
+    Extracts structural components: Ground Datum, Facade Shell, Roof Crown,
+    Floor Slabs, Fenestration Openings, Structural Columns.
+    """
+    in_p = Path(req.input_path)
+    if not in_p.exists():
+        raise HTTPException(status_code=400, detail=f"Input point cloud file not found: {req.input_path}")
+
+    out_las = Path(req.output_classified_las) if req.output_classified_las else None
+    res = segment_fused_cloud_randla(
+        in_p,
+        output_classified_las=out_las,
+        max_eval_points=req.max_eval_points or 30000
+    )
+    return res
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 26 — REAL FLOOR DETECTION ENGINE
+# ─────────────────────────────────────────────────────────────────────────────
+
+class DetectFloorsRequest(BaseModel):
+    input_path: str
+    floor_plan_path: Optional[str] = None
+    min_floor_clearance_m: Optional[float] = 2.40
+
+
+@router.post("/building/detect-floors")
+async def detect_floors_endpoint(req: DetectFloorsRequest) -> dict:
+    """
+    Step 26: Real floor detection engine.
+    Replaces mocked z_min + i * 3.0 calculation.
+    Combines 1D Z-KDE density profile, horizontal RANSAC planar fitting,
+    and window opening inversion to determine real floor levels and Z ranges.
+    """
+    in_p = Path(req.input_path)
+    if not in_p.exists():
+        raise HTTPException(status_code=400, detail=f"Input point cloud file not found: {req.input_path}")
+
+    fp = Path(req.floor_plan_path) if req.floor_plan_path else None
+    res = detect_floor_levels_from_survey(
+        in_p,
+        floor_plan_path=fp,
+        min_floor_clearance_m=req.min_floor_clearance_m or 2.40
+    )
+    return res
+
+
 
 
 
