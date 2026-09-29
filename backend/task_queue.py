@@ -77,6 +77,28 @@ class TaskQueueBroker:
 
         return job_record
 
+    def dispatch_spatial_pipeline(self, project_id: str, raw_las_path: str, target_epsg: int = 32643, job_id: Optional[str] = None) -> str:
+        """
+        Dispatches real 6-stage spatial pipeline (Step 16 & 17).
+        Uses Celery / Redis worker if connected, or asynchronous worker system.
+        """
+        import uuid
+        jid = job_id or str(uuid.uuid4())
+        if self.is_connected:
+            try:
+                from backend.tasks.processing_tasks import execute_real_spatial_pipeline
+                execute_real_spatial_pipeline.delay(project_id, raw_las_path, target_epsg, jid)
+                self.dispatch_job(jid, "REAL_SPATIAL_PIPELINE", {"project_id": project_id, "raw_las_path": raw_las_path, "target_epsg": target_epsg})
+                return jid
+            except Exception:
+                pass
+
+        # Native asynchronous worker fallback
+        from backend.job_engine import dispatch_job_async
+        dispatch_job_async(project_id, raw_las_path, target_epsg, jid)
+        self.dispatch_job(jid, "REAL_SPATIAL_PIPELINE", {"project_id": project_id, "raw_las_path": raw_las_path, "target_epsg": target_epsg})
+        return jid
+
     def update_job_progress(self, job_id: str, progress: float, status: str = "RUNNING"):
         if job_id in self.active_jobs:
             self.active_jobs[job_id]["progress"] = progress
@@ -89,13 +111,13 @@ class TaskQueueBroker:
 
     def get_status(self) -> Dict[str, Any]:
         return {
-            "broker": "Redis / Celery",
+            "broker": "Redis / Celery" if self.is_connected else "Asynchronous Worker Queue",
             "connected": self.is_connected,
             "host": REDIS_HOST,
             "port": REDIS_PORT,
             "active_workers_count": 4,
             "active_jobs_count": len(self.active_jobs),
-            "worker_types": ["GDAL_PDAL", "PHOTOGRAMMETRY", "AI_3D_STRATA"]
+            "worker_types": ["GDAL_PDAL", "PHOTOGRAMMETRY", "AI_3D_STRATA", "SPATIAL_DAG_PIPELINE"]
         }
 
 task_broker = TaskQueueBroker()

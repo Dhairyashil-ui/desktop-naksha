@@ -58,6 +58,16 @@ try:
         calculate_project_readiness_from_db,
         calculate_readiness,
     )
+    from backend.job_engine import (
+        run_real_spatial_pipeline,
+        dispatch_job_async,
+        get_job_full_status,
+    )
+    from backend.artifact_system import (
+        get_artifact,
+        list_job_artifacts,
+        ArtifactRecord,
+    )
 except ImportError:
     from database import engine
     from ingestion import (
@@ -94,6 +104,16 @@ except ImportError:
     from readiness_engine import (
         calculate_project_readiness_from_db,
         calculate_readiness,
+    )
+    from job_engine import (
+        run_real_spatial_pipeline,
+        dispatch_job_async,
+        get_job_full_status,
+    )
+    from artifact_system import (
+        get_artifact,
+        list_job_artifacts,
+        ArtifactRecord,
     )
 
 router = APIRouter(prefix="/api/v2", tags=["real"])
@@ -1486,6 +1506,111 @@ async def post_project_readiness_endpoint(
     if req and req.scores:
         return calculate_readiness(req.scores)
     return calculate_project_readiness_from_db(project_id)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 16 & 17 — REAL PROCESSING PIPELINE & ARTIFACT SYSTEM ENDPOINTS
+# ─────────────────────────────────────────────────────────────────────────────
+
+class DispatchPipelineRequest(BaseModel):
+    raw_las_path: Optional[str] = None
+    dataset_id: Optional[str] = None
+    target_epsg: Optional[int] = 32643
+    job_id: Optional[str] = None
+
+
+@router.post("/projects/{project_id}/jobs/spatial-pipeline")
+async def dispatch_spatial_pipeline_endpoint(
+    project_id: str,
+    req: Optional[DispatchPipelineRequest] = None,
+) -> dict:
+    """
+    Step 16 & 17: Dispatches real asynchronous 6-stage spatial pipeline:
+    Raw LAS -> Clean LAS -> Registered LAS -> Fused Cloud -> Building Cloud -> Mesh -> GLB
+    """
+    from pathlib import Path
+    target_epsg = (req.target_epsg if req else 32643) or 32643
+    job_id = req.job_id if req else None
+    raw_path = None
+
+    if req and req.raw_las_path:
+        raw_path = req.raw_las_path
+    elif req and req.dataset_id:
+        files = get_dataset_files(req.dataset_id)
+        if files:
+            raw_path = files[0]["file_path"]
+
+    if not raw_path:
+        # Search for any uploaded LiDAR dataset in this project
+        with engine.connect() as conn:
+            row = conn.execute(
+                sql_text("""
+                    SELECT df.file_path
+                    FROM dataset_files df
+                    JOIN input_datasets ds ON df.dataset_id = ds.id
+                    WHERE ds.project_id = :proj_id
+                      AND ds.category IN ('CAT_02_LIDAR_POINT_CLOUD', 'lidar_point_cloud', 'cat_02')
+                      AND df.file_path ILIKE '%.las%'
+                    ORDER BY df.created_at DESC
+                    LIMIT 1
+                """),
+                {"proj_id": project_id},
+            ).fetchone()
+            if row:
+                raw_path = row[0]
+
+    if not raw_path or not Path(raw_path).exists():
+        raise HTTPException(
+            status_code=400,
+            detail=f"No valid Raw LAS file found for project {project_id}. Provide raw_las_path or upload LiDAR dataset."
+        )
+
+    dispatched_id = dispatch_job_async(
+        project_id=project_id,
+        raw_las_path=raw_path,
+        target_epsg=target_epsg,
+        job_id=job_id,
+    )
+
+    return {
+        "job_id": dispatched_id,
+        "project_id": project_id,
+        "pipeline_type": "REAL_CADASTRAL_3D_LIDAR_PIPELINE",
+        "status": "PROCESSING",
+        "message": "Real spatial processing job dispatched asynchronously to background worker.",
+    }
+
+
+@router.get("/jobs/{job_id}")
+async def get_job_endpoint(job_id: str) -> dict:
+    """
+    Step 16 & 17: Retrieves complete Job, Nodes, and Artifacts status.
+    """
+    job = get_job_full_status(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    return job
+
+
+@router.get("/jobs/{job_id}/artifacts")
+async def get_job_artifacts_endpoint(job_id: str) -> List[dict]:
+    """
+    Step 17: Retrieves all artifacts produced by a given job.
+    """
+    arts = list_job_artifacts(job_id)
+    return [a.to_dict() for a in arts]
+
+
+@router.get("/artifacts/{artifact_id}")
+async def get_artifact_endpoint(artifact_id: str) -> dict:
+    """
+    Step 17: Retrieves single artifact by ID with SHA-256, path, size, CRS.
+    """
+    art = get_artifact(artifact_id)
+    if not art:
+        raise HTTPException(status_code=404, detail=f"Artifact {artifact_id} not found")
+    return art.to_dict()
+
 
 
 

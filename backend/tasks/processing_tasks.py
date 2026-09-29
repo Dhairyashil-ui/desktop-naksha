@@ -61,3 +61,19 @@ def validate_cadastral_topology(self, project_id: str, parcel_dataset_id: str):
         "areaReconciled": "100%",
         "ulpinAssigned": 450
     }
+
+@celery_app.task(bind=True, name="tasks.execute_real_spatial_pipeline")
+def execute_real_spatial_pipeline(self, project_id: str, raw_las_path: str, target_epsg: int = 32643, job_id: str = None):
+    """
+    Asynchronous Celery Task: Real 6-stage Spatial Pipeline (Step 16 & 17)
+    Raw LAS -> Clean LAS -> Registered LAS -> Fused Cloud -> Building Cloud -> Mesh -> GLB
+    """
+    from backend.job_engine import run_real_spatial_pipeline
+    job_rec = run_real_spatial_pipeline(
+        project_id=project_id,
+        raw_las_path=raw_las_path,
+        target_epsg=target_epsg,
+        job_id=job_id,
+    )
+    return job_rec.to_dict()
+
