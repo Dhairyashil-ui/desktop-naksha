@@ -315,3 +315,48 @@ class CanonicalProject(BaseModel):
                 )
             ]
         )
+
+
+# ─────────────────────────────────────────────────────────────────
+# STEP 7: REAL DATASET & DATASET FILES CANONICAL MODELS
+# ─────────────────────────────────────────────────────────────────
+
+class DatasetFileModel(BaseModel):
+    """
+    Individual file record belonging to a parent Dataset.
+    """
+    file_id: str = Field(..., description="Unique File UUID")
+    dataset_id: str = Field(..., description="Parent Dataset UUID")
+    filename: str = Field(..., description="Sanitized file name")
+    extension: str = Field(..., description="File extension, e.g. .jpg, .las, .csv")
+    file_role: str = Field("RAW_DATA", description="Semantic role in dataset (e.g. AERIAL_IMAGE, CAMERA_CALIBRATION, TRAJECTORY_DATA)")
+    mime_type: str = Field(..., description="Validated MIME type")
+    size_bytes: int = Field(..., description="Physical size in bytes")
+    sha256: str = Field(..., description="SHA-256 cryptographic checksum")
+    storage_location: Optional[str] = Field(None, description="Absolute or resolved disk location")
+    relative_path: Optional[str] = Field(None, description="Relative storage path")
+    is_corrupt: bool = Field(False, description="Whether file failed integrity check")
+    created_at: str = Field(..., description="Upload timestamp")
+
+
+class DatasetModel(BaseModel):
+    """
+    Real Dataset entity representing a category grouping in a Project.
+    Relationships: Project (1) → Dataset (N) → Dataset Files (M).
+    One input category can contain multiple files (e.g. Photogrammetry contains images, camera.csv, trajectory.csv).
+    """
+    dataset_id: str = Field(..., description="Unique Dataset UUID")
+    project_id: str = Field(..., description="Parent Project UUID")
+    category: str = Field(..., description="Canonical category enum, e.g. CAT_01_PHOTOGRAMMETRY")
+    name: str = Field(..., description="Human-readable dataset title")
+    status: str = Field("MISSING", description="Dataset status: MISSING, SCANNING, INVALID, PARTIAL, VALID, PROCESSING, COMPLETED")
+    completeness: float = Field(0.0, description="0-100% completeness based on required files present")
+    quality: float = Field(0.0, description="0-100% quality score based on file verification")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Metadata manifest and role breakdown")
+    validation_status: str = Field("PENDING", description="Validation status: PENDING, VALID, PARTIAL, WARNING, INVALID")
+    file_count: int = Field(0, description="Number of files in this dataset")
+    total_size_bytes: int = Field(0, description="Combined size of all files in bytes")
+    files: List[DatasetFileModel] = Field(default_factory=list, description="All child files grouped in this dataset")
+    created_at: str = Field(..., description="Creation ISO timestamp")
+    updated_at: str = Field(..., description="Last updated ISO timestamp")
+

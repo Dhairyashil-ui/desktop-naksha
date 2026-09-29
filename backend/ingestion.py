@@ -24,9 +24,27 @@ from fastapi import UploadFile, HTTPException
 try:
     from backend.config import settings
     from backend.database import engine
+    from backend.dataset_model import (
+        get_or_create_project_dataset,
+        infer_file_role,
+        sync_dataset_metrics,
+        get_dataset_model,
+        list_project_datasets_grouped,
+        DatasetModel,
+        DatasetFileModel,
+    )
 except ImportError:
     from config import settings
     from database import engine
+    from dataset_model import (
+        get_or_create_project_dataset,
+        infer_file_role,
+        sync_dataset_metrics,
+        get_dataset_model,
+        list_project_datasets_grouped,
+        DatasetModel,
+        DatasetFileModel,
+    )
 
 from sqlalchemy import text
 
@@ -371,11 +389,11 @@ async def store_uploaded_files(
         if not proj_row:
             raise HTTPException(status_code=404, detail=f"Project with ID '{project_id}' not found in database")
 
-    # 2. Setup dataset identifiers & storage directory
-    if not dataset_id:
-        dataset_id = str(uuid.uuid4())
-
+    # 2. Setup dataset identifiers & storage directory (group files into category dataset)
     now = datetime.now(timezone.utc)
+    if not dataset_id:
+        dataset_id = get_or_create_project_dataset(project_id, category_enum, dataset_name)
+
     if not dataset_name:
         friendly = CATEGORY_NAMES.get(category_enum, "Dataset")
         dataset_name = f"{friendly}_{now.strftime('%Y%m%d_%H%M%S')}"
@@ -473,11 +491,14 @@ async def store_uploaded_files(
 
             file_id = str(uuid.uuid4())
 
+            file_role = infer_file_role(sanitized_name, category_enum, detected_mime)
+
             saved_files.append({
                 "file_id": file_id,
                 "dataset_id": dataset_id,
                 "filename": sanitized_name,
                 "raw_filename": raw_filename,
+                "file_role": file_role,
                 "size": file_size,
                 "size_bytes": file_size,
                 "SHA256": sha256_hex,
@@ -556,7 +577,7 @@ async def store_uploaded_files(
                     sha256, s3_bucket, s3_key, is_corrupt, created_at
                 ) VALUES (
                     :id, :dataset_id, :rel_path, :filename,
-                    :ext, 'RAW_DATA', :mime, :size,
+                    :ext, :role, :mime, :size,
                     :sha256, :bucket, :s3_key, :is_corrupt, :now
                 );
             """), {
@@ -565,6 +586,7 @@ async def store_uploaded_files(
                 "rel_path": f["relative_path"],
                 "filename": f["filename"],
                 "ext": ext_val,
+                "role": f.get("file_role", "RAW_DATA"),
                 "mime": f["mime_type"],
                 "size": f["size_bytes"],
                 "sha256": f["sha256"],
@@ -574,6 +596,9 @@ async def store_uploaded_files(
                 "now": now,
             })
         conn.commit()
+
+    # Step 7: Recalculate completeness, quality, and validation_status across all grouped files
+    ds_model = sync_dataset_metrics(dataset_id)
 
     # Form structured response meeting all exact criteria
     first_file = saved_files[0]
@@ -591,8 +616,17 @@ async def store_uploaded_files(
         "storage location": first_file["storage location"],
         "upload_status": first_file["upload_status"],
         "upload status": first_file["upload status"],
+        # Step 7 Real Dataset Model Properties:
+        "status": ds_model.status if ds_model else "VALID",
+        "completeness": ds_model.completeness if ds_model else 0.0,
+        "quality": ds_model.quality if ds_model else 100.0,
+        "metadata": ds_model.metadata if ds_model else {},
+        "validation_status": ds_model.validation_status if ds_model else "PENDING",
+        "file_count": ds_model.file_count if ds_model else len(saved_files),
+        "total_size_bytes": ds_model.total_size_bytes if ds_model else total_bytes,
+        "dataset": ds_model.dict() if ds_model else None,
         # Multi-file batch properties
-        "files": saved_files,
+        "files": [f.dict() for f in ds_model.files] if ds_model else saved_files,
         "files_saved": len(saved_files),
         "total_bytes": total_bytes,
         "rejected": rejected_files,
@@ -603,84 +637,34 @@ async def store_uploaded_files(
 
 def get_dataset_files(dataset_id: str) -> List[Dict[str, Any]]:
     """Returns all stored files for a dataset from the database."""
-    try:
-        with engine.connect() as conn:
-            rows = conn.execute(text("""
-                SELECT id, file_name, relative_path, size_bytes, mime_type, sha256, is_corrupt, created_at
-                FROM dataset_files
-                WHERE dataset_id = :id
-                ORDER BY file_name;
-            """), {"id": dataset_id}).fetchall()
-            return [
-                {
-                    "file_id": str(r[0]),
-                    "filename": r[1],
-                    "path": r[2],
-                    "size_bytes": r[3],
-                    "mime_type": r[4],
-                    "sha256": r[5],
-                    "is_corrupt": r[6],
-                    "created_at": str(r[7]),
-                }
-                for r in rows
-            ]
-    except Exception:
+    ds = get_dataset_model(dataset_id)
+    if not ds:
         return []
+    return [
+        {
+            "file_id": f.file_id,
+            "filename": f.filename,
+            "path": f.relative_path or f.storage_location or "",
+            "size_bytes": f.size_bytes,
+            "mime_type": f.mime_type,
+            "sha256": f.sha256,
+            "file_role": f.file_role,
+            "is_corrupt": f.is_corrupt,
+            "created_at": f.created_at,
+        }
+        for f in ds.files
+    ]
 
 
 def get_dataset_info(dataset_id: str) -> Optional[Dict[str, Any]]:
-    """Returns dataset metadata from database."""
-    try:
-        with engine.connect() as conn:
-            row = conn.execute(text("""
-                SELECT id, project_id, category, name, status,
-                       readiness_score, total_size_bytes, file_count,
-                       metadata_manifest, created_at, updated_at
-                FROM input_datasets
-                WHERE id = :id;
-            """), {"id": dataset_id}).fetchone()
-            if not row:
-                return None
-            return {
-                "dataset_id": str(row[0]),
-                "project_id": str(row[1]),
-                "category": row[2],
-                "name": row[3],
-                "status": str(row[4]),
-                "readiness_score": float(row[5]) if row[5] else 0.0,
-                "total_bytes": int(row[6]) if row[6] else 0,
-                "file_count": int(row[7]) if row[7] else 0,
-                "manifest": row[8],
-                "created_at": str(row[9]),
-                "updated_at": str(row[10]),
-            }
-    except Exception:
+    """Returns real dataset model dictionary from database."""
+    ds = get_dataset_model(dataset_id)
+    if not ds:
         return None
+    return ds.dict()
 
 
 def list_project_datasets(project_id: str) -> List[Dict[str, Any]]:
-    """Returns all datasets for a project."""
-    try:
-        with engine.connect() as conn:
-            rows = conn.execute(text("""
-                SELECT id, category, name, status, readiness_score,
-                       total_size_bytes, file_count, created_at
-                FROM input_datasets
-                WHERE project_id = :pid
-                ORDER BY created_at DESC;
-            """), {"pid": project_id}).fetchall()
-            return [
-                {
-                    "dataset_id": str(r[0]),
-                    "category": r[1],
-                    "name": r[2],
-                    "status": str(r[3]),
-                    "readiness_score": float(r[4]) if r[4] else 0.0,
-                    "total_bytes": int(r[5]) if r[5] else 0,
-                    "file_count": int(r[6]) if r[6] else 0,
-                    "created_at": str(r[7]),
-                }
-                for r in rows
-            ]
-    except Exception:
-        return []
+    """Returns all real datasets for a project with their grouped files and metrics."""
+    datasets = list_project_datasets_grouped(project_id)
+    return [d.dict() for d in datasets]

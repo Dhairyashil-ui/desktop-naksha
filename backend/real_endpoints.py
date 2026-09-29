@@ -309,11 +309,12 @@ async def upload_dataset_files(
     """
     Project-scoped route for upload: delegates to store_uploaded_files with full validation.
     """
-    return await upload_datasets(
+    cat_enum = normalize_category(category_id)
+    return await store_uploaded_files(
         project_id=project_id,
-        category_id=category_id,
-        dataset_name=dataset_name,
+        category_id=cat_enum,
         files=files,
+        dataset_name=dataset_name,
     )
 
 
@@ -322,6 +323,39 @@ async def get_project_datasets_real(project_id: str):
     """Returns all real datasets registered in the database for this project."""
     datasets = list_project_datasets(project_id)
     return {"project_id": project_id, "count": len(datasets), "datasets": datasets}
+
+
+@router.get("/datasets/{dataset_id}")
+async def get_dataset_detail(dataset_id: str):
+    """
+    Step 7 Real Dataset Model.
+    Returns: dataset_id, project_id, category, status, completeness,
+    quality, metadata, validation_status, and all grouped files.
+    """
+    info = get_dataset_info(dataset_id)
+    if not info:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    return info
+
+
+@router.get("/projects/{project_id}/datasets/{category_id}")
+async def get_project_category_dataset_endpoint(project_id: str, category_id: str):
+    """
+    Returns the grouped dataset for a category in a project.
+    """
+    cat_enum = normalize_category(category_id)
+    with engine.connect() as conn:
+        row = conn.execute(sql_text("""
+            SELECT id FROM input_datasets
+            WHERE project_id = :project_id AND category = :category
+            ORDER BY created_at DESC
+            LIMIT 1;
+        """), {"project_id": project_id, "category": cat_enum}).fetchone()
+
+    if not row:
+        raise HTTPException(status_code=404, detail=f"No dataset found for category {category_id} in project {project_id}")
+
+    return get_dataset_info(str(row[0]))
 
 
 @router.get("/datasets/{dataset_id}/files")
@@ -360,12 +394,16 @@ async def get_live_input_channels(project_id: str):
         exts = CATEGORY_EXTENSIONS.get(cat_id, [])
 
         if ds:
-            score = float(ds.get("readiness_score", 0))
-            db_status = str(ds.get("status", "UPLOADED"))
-            if score >= 80:
+            completeness = float(ds.get("completeness", 0.0))
+            quality = float(ds.get("quality", 100.0))
+            val_status = str(ds.get("validation_status", "PENDING"))
+            score = float(ds.get("readiness_score") or ((completeness * 0.5) + (quality * 0.5)))
+            db_status = str(ds.get("status", "VALID"))
+
+            if val_status == "PASSED" or score >= 80:
                 ui_status = "READY"
                 badge = "Ready"
-            elif score >= 40:
+            elif score >= 40 or val_status == "PARTIAL":
                 ui_status = "READY_WITH_WARNINGS"
                 badge = "Warnings"
             elif score > 0:
@@ -375,7 +413,8 @@ async def get_live_input_channels(project_id: str):
                 ui_status = "UPLOADED"
                 badge = "Pending Validation"
 
-            size_kb = ds["total_bytes"] // 1024
+            total_bytes = ds.get("total_bytes") or ds.get("total_size_bytes") or 0
+            size_kb = total_bytes // 1024
             size_str = f"{size_kb / 1024:.1f} MB" if size_kb >= 1024 else f"{size_kb} KB"
 
             channels.append({
@@ -387,12 +426,16 @@ async def get_live_input_channels(project_id: str):
                 "datasetStatus": db_status,
                 "statusDisplay": ui_status.replace("_", " "),
                 "readinessScore": score,
+                "completeness": completeness,
+                "quality": quality,
+                "validationStatus": val_status,
                 "datasetCount": 1,
                 "datasetId": ds["dataset_id"],
-                "primaryMetric": f"{ds['file_count']} file(s) — {size_str}",
+                "primaryMetric": f"{ds.get('file_count', len(ds.get('files', [])))} file(s) — {size_str}",
                 "badge": badge,
                 "summary": f"Uploaded: {ds['created_at'][:19].replace('T', ' ')}",
                 "supportedExtensions": exts,
+                "files": ds.get("files", []),
             })
         else:
             channels.append({
