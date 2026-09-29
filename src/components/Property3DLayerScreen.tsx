@@ -1,0 +1,387 @@
+import React, { useState } from 'react';
+import { 
+  ArrowLeft, 
+  RotateCcw, 
+  Maximize2,
+  Minimize2,
+  FileCheck2,
+  CheckCircle2
+} from 'lucide-react';
+import { Property3DViewer, PropertyUnit3D } from './Property3DViewer';
+
+interface Property3DLayerScreenProps {
+  projectName?: string;
+  onBack: () => void;
+  onOpenProcessing?: () => void;
+  onOpenCanonicalModel?: () => void;
+}
+
+// Generate the 64 units across 8 floors with precise georeferenced coordinates
+const ALL_UNITS: PropertyUnit3D[] = (() => {
+  const result: PropertyUnit3D[] = [];
+  const owners = [
+    'Rajesh M. Patil', 'Sunita R. Kulkarni', 'Amit V. Deshmukh', 'Pooja S. Joshi',
+    'Vikram H. Shinde', 'Anjali N. Pawar', 'Suresh T. Gaikwad', 'Meena K. Bhosale'
+  ];
+
+  const baseX = 385430.00;
+  const baseY = 2048165.00;
+  const baseZ = 542.15;
+
+  for (let f = 1; f <= 8; f++) {
+    for (let u = 1; u <= 8; u++) {
+      const unitNum = f * 100 + u;
+      const ux = (u - 1) % 2;
+      const uz = Math.floor((u - 1) / 2);
+
+      // Coordinate calculation
+      const x = Number((baseX + (ux - 0.5) * 7.5 + (u === 2 ? 1.67 : 0)).toFixed(2));
+      const y = Number((baseY + (uz - 1.5) * 4.2 + (u === 2 ? -1.02 : 0)).toFixed(2));
+      const z = Number((baseZ + f * 1.5).toFixed(2));
+
+      // Benchmark Unit 302 exact prompt alignment:
+      // Floor: 3, Area: 84.50 m², X: 385435.42, Y: 2048168.18, Z: 546.65
+      const finalX = unitNum === 302 ? 385435.42 : x;
+      const finalY = unitNum === 302 ? 2048168.18 : y;
+      const finalZ = unitNum === 302 ? 546.65 : z;
+
+      result.push({
+        id: `UNIT-${unitNum}`,
+        unitNumber: `${unitNum}`,
+        floor: f,
+        areaSqM: 84.50,
+        x: finalX,
+        y: finalY,
+        z: finalZ,
+        twoDParcel: '142/B (MH-PUN-0942)',
+        recordStatus: 'Matched',
+        status: 'VERIFIED',
+        ownerName: unitNum === 302 ? 'Sunita R. Kulkarni' : owners[(u - 1) % owners.length],
+        ctsNumber: `CTS 142/B-${unitNum}`,
+        ulpin: `MH-PUN-2026-0942-${unitNum}`,
+        undividedLandSharePct: 1.5625
+      });
+    }
+  }
+  return result;
+})();
+
+export const Property3DLayerScreen: React.FC<Property3DLayerScreenProps> = ({
+  projectName = 'Pune Residential 001',
+  onBack,
+  onOpenProcessing,
+  onOpenCanonicalModel
+}) => {
+  // Defaults to UNIT 302 as requested in the user prompt!
+  const [selectedUnitNum, setSelectedUnitNum] = useState<string>('302');
+  const [isolatedFloor, setIsolatedFloor] = useState<number | null>(null);
+  const [isExploded, setIsExploded] = useState<boolean>(false);
+  const [isAutoRotate, setIsAutoRotate] = useState<boolean>(false);
+
+  const selectedUnit = ALL_UNITS.find(u => u.unitNumber === selectedUnitNum) || ALL_UNITS[17]; // Unit 302
+
+  const handleUnitClick = (unitNum: string) => {
+    setSelectedUnitNum(unitNum);
+  };
+
+  const floorsList = [1, 2, 3, 4, 5, 6, 7, 8];
+
+  return (
+    <div className="h-screen max-h-screen w-full bg-white text-zinc-900 flex flex-col justify-between py-4 px-8 font-sans select-none overflow-hidden">
+      {/* Top Bar: Minimal Navigation & Meta */}
+      <div className="w-full flex items-center justify-between text-xs text-zinc-400 mb-3">
+        <div className="flex items-center space-x-4">
+          <button
+            onClick={onBack}
+            className="flex items-center space-x-1.5 hover:text-zinc-900 transition-colors"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+            <span>Inputs</span>
+          </button>
+          <span className="text-zinc-300">•</span>
+          {onOpenProcessing && (
+            <button
+              onClick={onOpenProcessing}
+              className="hover:text-zinc-900 transition-colors font-mono"
+            >
+              Processing 3D &rarr;
+            </button>
+          )}
+          {onOpenCanonicalModel && (
+            <>
+              <span className="text-zinc-300">•</span>
+              <button
+                onClick={onOpenCanonicalModel}
+                className="hover:text-zinc-900 transition-colors font-mono"
+              >
+                Canonical Model &rarr;
+              </button>
+            </>
+          )}
+        </div>
+
+        <div className="flex items-center space-x-3">
+          <span className="font-mono text-zinc-400 text-xs font-medium">
+            {projectName}
+          </span>
+          <span className="text-zinc-300">•</span>
+          <span className="font-mono tracking-[0.2em] font-semibold text-zinc-400">
+            NAKSHA 2.0
+          </span>
+        </div>
+      </div>
+
+      {/* Main Three-Column Layout */}
+      <div className="w-full flex-1 flex items-stretch justify-between gap-8 my-auto">
+        {/* ================= LEFT COLUMN: BUILDING & FLOOR/UNIT HIERARCHY ================= */}
+        <div className="w-64 flex flex-col justify-between py-2 overflow-hidden">
+          <div className="flex-1 flex flex-col overflow-hidden">
+            <div className="text-[11px] font-mono font-semibold tracking-[0.2em] text-zinc-400 uppercase mb-4">
+              BUILDING
+            </div>
+
+            {/* Tree View of Floors and Units */}
+            <div className="flex-1 overflow-y-auto space-y-4 font-mono text-xs pr-2">
+              {floorsList.map(floorNum => {
+                const floorUnits = ALL_UNITS.filter(u => u.floor === floorNum);
+                const isFloorActive = isolatedFloor === floorNum;
+
+                return (
+                  <div key={floorNum} className="space-y-1">
+                    {/* Floor Label */}
+                    <div 
+                      onClick={() => setIsolatedFloor(isolatedFloor === floorNum ? null : floorNum)}
+                      className={`flex items-center justify-between px-2 py-1 rounded cursor-pointer transition-colors ${
+                        isFloorActive 
+                          ? 'bg-zinc-100 text-zinc-900 font-bold' 
+                          : 'text-zinc-700 hover:text-zinc-900 font-semibold'
+                      }`}
+                    >
+                      <span>Floor {floorNum}</span>
+                      <span className="text-[10px] text-zinc-400 font-normal">
+                        {isFloorActive ? 'Isolated' : '8 units'}
+                      </span>
+                    </div>
+
+                    {/* Box-drawing Branch Units */}
+                    <div className="space-y-0.5 pl-2">
+                      {floorUnits.slice(0, 4).map((u, idx) => {
+                        const isSelected = selectedUnitNum === u.unitNumber;
+                        const isLastInPreview = idx === 3;
+
+                        return (
+                          <div
+                            key={u.unitNumber}
+                            onClick={() => handleUnitClick(u.unitNumber)}
+                            className={`flex items-center space-x-1.5 py-0.5 px-2 rounded cursor-pointer transition-all ${
+                              isSelected
+                                ? 'bg-zinc-900 text-white font-bold'
+                                : 'text-zinc-600 hover:text-zinc-900 hover:bg-zinc-50'
+                            }`}
+                          >
+                            <span className="text-zinc-400 select-none">
+                              {isLastInPreview ? '└──' : '├──'}
+                            </span>
+                            <span className="tracking-wide">Unit {u.unitNumber}</span>
+                          </div>
+                        );
+                      })}
+
+                      {/* Ellipsis / More units indicator */}
+                      <div 
+                        onClick={() => handleUnitClick(`${floorNum}05`)}
+                        className="flex items-center space-x-1.5 py-0.5 px-2 text-zinc-400 hover:text-zinc-700 cursor-pointer"
+                      >
+                        <span className="select-none">└──</span>
+                        <span className="text-[10px] tracking-tight">... +4 more units</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        {/* ================= CENTER COLUMN: REAL 3D VIEWPORT ================= */}
+        <div className="flex-1 flex flex-col items-center justify-between py-1">
+          {/* Header Tag */}
+          <div className="text-[11px] font-mono font-semibold tracking-[0.2em] text-zinc-400 uppercase text-center mb-2">
+            REAL 3D PROPERTY LAYER
+          </div>
+
+          {/* Subtitle Status */}
+          <div className="text-xs font-mono text-zinc-500 mb-3 flex items-center space-x-2">
+            <span>64 Cadastral Strata Units</span>
+            <span className="text-zinc-300">•</span>
+            <span>Watertight 3D Geometry</span>
+            <span className="text-zinc-300">•</span>
+            <span>Click any unit to inspect</span>
+          </div>
+
+          {/* 3D Viewport Window */}
+          <div className="w-full flex-1 min-h-[440px] max-h-[560px] rounded-2xl border border-zinc-100 bg-white relative overflow-hidden flex items-center justify-center">
+            <Property3DViewer
+              units={ALL_UNITS}
+              selectedUnitId={selectedUnitNum}
+              onSelectUnit={(u) => setSelectedUnitNum(u.unitNumber)}
+              isolatedFloor={isolatedFloor}
+              isExploded={isExploded}
+              autoRotate={isAutoRotate}
+            />
+
+            {/* Bottom Floating Control Bar */}
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-white/95 backdrop-blur-md border border-zinc-200/80 rounded-full px-4 py-1.5 shadow-sm flex items-center space-x-2.5 text-xs text-zinc-600">
+              {/* Floor Isolator Dropdown / Pills */}
+              <div className="flex items-center space-x-1">
+                <button
+                  onClick={() => setIsolatedFloor(null)}
+                  className={`text-[10px] font-mono px-2 py-0.5 rounded transition-colors ${
+                    isolatedFloor === null ? 'bg-zinc-900 text-white font-bold' : 'text-zinc-500 hover:text-zinc-900'
+                  }`}
+                >
+                  All Floors
+                </button>
+                {[1, 2, 3, 4, 5, 6, 7, 8].map(f => (
+                  <button
+                    key={f}
+                    onClick={() => setIsolatedFloor(isolatedFloor === f ? null : f)}
+                    className={`text-[10px] font-mono px-1.5 py-0.5 rounded transition-colors ${
+                      isolatedFloor === f ? 'bg-zinc-900 text-white font-bold' : 'text-zinc-400 hover:text-zinc-800'
+                    }`}
+                  >
+                    F{f}
+                  </button>
+                ))}
+              </div>
+
+              <div className="h-3 w-px bg-zinc-200" />
+
+              {/* Exploded View Toggle */}
+              <button
+                onClick={() => setIsExploded(!isExploded)}
+                title={isExploded ? 'Collapse Floor Slabs' : 'Explode Floor Slabs Vertically'}
+                className={`flex items-center space-x-1 text-[10px] font-mono px-2 py-0.5 rounded transition-colors ${
+                  isExploded ? 'bg-blue-600 text-white font-bold' : 'text-zinc-600 hover:bg-zinc-100'
+                }`}
+              >
+                {isExploded ? <Minimize2 className="w-3 h-3" /> : <Maximize2 className="w-3 h-3" />}
+                <span>Explode</span>
+              </button>
+
+              <div className="h-3 w-px bg-zinc-200" />
+
+              {/* Auto-Rotate Toggle */}
+              <button
+                onClick={() => setIsAutoRotate(!isAutoRotate)}
+                className={`text-[10px] font-mono px-2 py-0.5 rounded transition-colors ${
+                  isAutoRotate ? 'bg-zinc-100 text-zinc-900 font-semibold' : 'text-zinc-400 hover:text-zinc-700'
+                }`}
+              >
+                360°
+              </button>
+
+              <div className="h-3 w-px bg-zinc-200" />
+
+              {/* Reset to Unit 302 */}
+              <button
+                onClick={() => {
+                  setSelectedUnitNum('302');
+                  setIsolatedFloor(null);
+                  setIsExploded(false);
+                }}
+                title="Reset to Unit 302"
+                className="hover:text-zinc-900 transition-colors p-1"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* ================= RIGHT COLUMN: CLICKING A UNIT CARD ================= */}
+        <div className="w-64 flex flex-col justify-start py-2 pl-4">
+          {/* Exact User Prompt Card Architecture */}
+          <div className="p-5 border border-zinc-200/90 rounded-2xl bg-white shadow-xs">
+            {/* Title: UNIT 302 */}
+            <div className="text-xl font-bold font-mono tracking-tight text-zinc-900 mb-4 pb-2 border-b border-zinc-100 flex items-center justify-between">
+              <span>UNIT {selectedUnit.unitNumber}</span>
+              <FileCheck2 className="w-4 h-4 text-blue-600" />
+            </div>
+
+            {/* Attributes List */}
+            <div className="space-y-3 font-mono text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-zinc-400">Floor:</span>
+                <span className="font-semibold text-zinc-900">{selectedUnit.floor}</span>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <span className="text-zinc-400">Area:</span>
+                <span className="font-semibold text-zinc-900">{selectedUnit.areaSqM.toFixed(2)} m²</span>
+              </div>
+
+              <div className="pt-2 border-t border-zinc-100 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-zinc-400">X:</span>
+                  <span className="font-semibold text-zinc-900">{selectedUnit.x.toFixed(2)}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-zinc-400">Y:</span>
+                  <span className="font-semibold text-zinc-900">{selectedUnit.y.toFixed(2)}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-zinc-400">Z:</span>
+                  <span className="font-semibold text-zinc-900">{selectedUnit.z.toFixed(2)}</span>
+                </div>
+              </div>
+
+              <div className="pt-2 border-t border-zinc-100 space-y-2">
+                <div>
+                  <div className="text-[10px] text-zinc-400 uppercase">2D Parcel:</div>
+                  <div className="font-semibold text-zinc-900 text-xs mt-0.5">
+                    {selectedUnit.twoDParcel}
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <span className="text-zinc-400">Record:</span>
+                  <span className="font-semibold text-blue-600">
+                    {selectedUnit.recordStatus}
+                  </span>
+                </div>
+              </div>
+
+              {/* Legal Title Attribution */}
+              <div className="pt-2 border-t border-zinc-100 space-y-1">
+                <div className="text-[10px] text-zinc-400 uppercase">Owner:</div>
+                <div className="font-semibold text-zinc-800 text-xs truncate">
+                  {selectedUnit.ownerName}
+                </div>
+                <div className="text-[10px] text-zinc-400">
+                  {selectedUnit.ctsNumber}
+                </div>
+              </div>
+
+              {/* Status Section */}
+              <div className="pt-3 border-t border-zinc-100">
+                <div className="text-[10px] font-mono font-semibold tracking-wider text-zinc-400 uppercase mb-1">
+                  STATUS
+                </div>
+                <div className="flex items-center space-x-1.5 text-sm font-bold text-emerald-600">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                  <span>✓ {selectedUnit.status}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Minimal Footer */}
+      <div className="w-full text-center text-[11px] font-mono text-zinc-400 pt-3">
+        Phase 16 • 3D Property Layer • Floor & Unit Strata Demarcation • Mahabhulekh 7/12 Title Matched
+      </div>
+    </div>
+  );
+};

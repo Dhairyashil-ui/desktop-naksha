@@ -1,0 +1,21 @@
+[package]
+name = "surveynaksha"
+version = "2.0.0"
+description = "Naksha 2.0 Land Survey, Geospatial Mapping & Cadastral Intelligence Desktop Platform"
+authors = ["Naksha Core Team"]
+license = "Proprietary"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "1.5", features = [] }
+
+[dependencies]
+tauri = { version = "1.5", features = [ "shell-open", "dialog-all", "fs-all", "path-all", "window-all" ] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+reqwest = { version = "0.11", features = ["json"] }
+tokio = { version = "1", features = ["full"] }
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
