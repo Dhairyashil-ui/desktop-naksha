@@ -155,7 +155,11 @@ const INITIAL_PROJECT_STATE: ProjectVirtualState = {
 export const App: React.FC = () => {
   const [currentScreen, setCurrentScreen] = useState<'NEW_PROJECT' | 'DATA_INPUTS' | 'UPLOAD_CATEGORY' | 'SCANNER' | 'PROCESSING' | 'JOB_GRAPH' | 'WORKSPACE' | 'CANONICAL_MODEL' | 'PROPERTY_3D' | 'RECORD_MATCHING' | 'VALIDATION' | 'PACKAGES'>('NEW_PROJECT');
   const [inputs, setInputs] = useState(INITIAL_INPUTS);
-  const [uploadTarget, setUploadTarget] = useState<{ num: string; name: string; categoryId: string }>({ num: '01', name: 'Photogrammetry', categoryId: 'CAT_01_PHOTOGRAMMETRY' });
+  const [uploadTarget, setUploadTarget] = useState<{ num: string; name: string; categoryId: string; datasetId?: string }>({ 
+    num: '01', 
+    name: 'Photogrammetry', 
+    categoryId: 'CAT_01_PHOTOGRAMMETRY' 
+  });
   const [project, setProject] = useState<ProjectVirtualState>(INITIAL_PROJECT_STATE);
   const [projectId, setProjectId] = useState<string>(INITIAL_PROJECT_STATE.projectId);
   const [selectedChannel, setSelectedChannel] = useState<InputChannel | null>(null);
@@ -214,16 +218,26 @@ export const App: React.FC = () => {
     } catch {}
   }, [projectId]);
 
-  const handleOpenUpload = (num: string, name: string, categoryId?: string) => {
+  const handleOpenUpload = (num: string, name: string, categoryId?: string, datasetId?: string) => {
     const catId = categoryId || `CAT_0${num}_PHOTOGRAMMETRY`;
-    setUploadTarget({ num, name, categoryId: catId });
+    setUploadTarget({ num, name, categoryId: catId, datasetId });
     setCurrentScreen('UPLOAD_CATEGORY');
   };
 
-  const handleDatasetSaved = (_catNum: string, _datasetInfo: any) => {
-    // Files are now real — refresh live channel statuses then go back to Data Inputs
+  const handleOpenScanner = (num: string, name: string, categoryId?: string, datasetId?: string) => {
+    const catId = categoryId || `CAT_0${num}_PHOTOGRAMMETRY`;
+    setUploadTarget({ num, name, categoryId: catId, datasetId });
+    setCurrentScreen('SCANNER');
+  };
+
+  const handleDatasetSaved = (_catNum: string, datasetInfo: any) => {
     refreshLiveChannels();
-    setCurrentScreen('DATA_INPUTS');
+    if (datasetInfo?.dataset_id) {
+      setUploadTarget(prev => ({ ...prev, datasetId: datasetInfo.dataset_id }));
+      setCurrentScreen('SCANNER');
+    } else {
+      setCurrentScreen('DATA_INPUTS');
+    }
   };
 
   const handleFinishScan = (completeness: number, quality: number, readyForProcessing: boolean, status?: DatasetStatus) => {
@@ -311,9 +325,11 @@ export const App: React.FC = () => {
       return (
         <DataInputsScreen
           projectName={project.title}
+          projectId={projectId}
           externalInputs={inputs}
           onInputsChange={setInputs}
           onOpenUpload={handleOpenUpload}
+          onOpenScanner={handleOpenScanner}
           onBack={() => setCurrentScreen('NEW_PROJECT')}
           onOpenWorkspace={() => setCurrentScreen('WORKSPACE')}
           onOpenCanonicalModel={() => setCurrentScreen('CANONICAL_MODEL')}
@@ -344,10 +360,12 @@ export const App: React.FC = () => {
       );
     }
 
-    // PHASE 8: The Scanner Screen (Scanning checklist -> 82% Data Readiness -> STATUS PARTIALLY READY)
+    // PHASE 8: The Real Scanner Screen (10-Stage Physical File Verification)
     if (currentScreen === 'SCANNER') {
       return (
         <DatasetScannerScreen
+          datasetId={uploadTarget.datasetId}
+          projectId={projectId}
           categoryName={uploadTarget.name.toUpperCase()}
           onFinishScan={handleFinishScan}
           onBack={() => setCurrentScreen('DATA_INPUTS')}

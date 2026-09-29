@@ -11,10 +11,13 @@ Replaces all mocked endpoints with real implementations:
 """
 
 import uuid
+import json
+import asyncio
 from typing import List, Optional
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import text as sql_text
 
@@ -31,6 +34,7 @@ try:
     )
     from backend.file_validator import validate_dataset_by_id
     from backend.operation_logger import operation_logger, LogLevel
+    from backend.scanner_engine import run_real_scanner_pipeline, ScannerPipelineResult
 except ImportError:
     from database import engine
     from ingestion import (
@@ -44,6 +48,7 @@ except ImportError:
     )
     from file_validator import validate_dataset_by_id
     from operation_logger import operation_logger, LogLevel
+    from scanner_engine import run_real_scanner_pipeline, ScannerPipelineResult
 
 router = APIRouter(prefix="/api/v2", tags=["real"])
 
@@ -459,69 +464,119 @@ async def get_live_input_channels(project_id: str):
 
 
 # ─────────────────────────────────────────────────────────────────
-# REAL FILE VALIDATION
+# REAL 10-STAGE DATASET SCANNER (Phase 2 / Step 8)
 # ─────────────────────────────────────────────────────────────────
 
-@router.post("/datasets/{dataset_id}/validate")
-async def validate_dataset_real(dataset_id: str):
+@router.post("/datasets/{dataset_id}/scan")
+async def scan_dataset_endpoint(dataset_id: str):
     """
-    REAL: Reads actual stored file bytes.
-    - LAS/LAZ: laspy reads header → real point count, CRS, bounding box
-    - Images: magic byte detection → real format confirmation
-    - GeoJSON: JSON parse → real feature count + CRS
-    - CSV: column header scan → real coordinate detection
-    Returns actual quality score, not hardcoded values.
+    Executes the real 10-stage scanner pipeline on actual uploaded files.
+    Never uses timers or hardcoded values.
     """
     info = get_dataset_info(dataset_id)
     if not info:
         raise HTTPException(status_code=404, detail="Dataset not found")
 
     cat_label = info["category"].replace("CAT_", "").split("_")[0]
-
     await operation_logger.log(
         category=cat_label,
-        message=f"File validation started: {info['name']}",
-        detail=f"Category: {info['category']}, Files: {info['file_count']}"
+        message=f"Scanner pipeline started: {info['name']}",
+        detail=f"10-stage verification across {info.get('file_count', 0)} file(s)"
     )
 
-    result = validate_dataset_by_id(dataset_id)
-    if not result:
-        raise HTTPException(status_code=500, detail="Files not found on disk")
-
-    # Write updated score back to database
     try:
-        new_status = (
-            "VALID" if result.ready_for_processing else
-            ("PARTIAL" if result.quality_score > 20 else "INVALID")
-        )
-        with engine.connect() as conn:
-            conn.execute(sql_text("""
-                UPDATE input_datasets
-                SET readiness_score = :score, status = :status, updated_at = NOW()
-                WHERE id = :id
-            """), {"score": result.quality_score, "status": new_status, "id": dataset_id})
-            conn.commit()
-    except Exception:
-        pass
+        result = await run_real_scanner_pipeline(dataset_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Scanner error: {str(e)}")
 
     lvl = LogLevel.SUCCESS if result.ready_for_processing else LogLevel.WARNING
-    crs_str = f"CRS: {result.crs_detected}" if result.crs_detected else "CRS: not detected"
-    pts_str = f", Points: {result.point_count:,}" if result.point_count else ""
-
     await operation_logger.log(
         category=cat_label,
-        message=f"Validation complete: {result.quality_score:.0f}% quality — {'READY' if result.ready_for_processing else 'WARNINGS'}",
+        message=f"Scan complete: {result.status} (C: {result.completeness}%, Q: {result.quality}%)",
         level=lvl,
-        detail=f"{crs_str}{pts_str}, Errors: {len(result.errors)}"
+        detail=f"CRS: {result.crs_detected or 'None'}, Checks: {len(result.quality_checks)}"
     )
 
     return result.dict()
 
 
+@router.get("/datasets/{dataset_id}/scan/stream")
+async def scan_dataset_stream(dataset_id: str):
+    """
+    Server-Sent Events (SSE) streaming endpoint for the real 10-stage scanner.
+    Each event corresponds to an actual completed operation on disk files.
+    """
+    info = get_dataset_info(dataset_id)
+    if not info:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+
+    async def event_generator():
+        queue: asyncio.Queue = asyncio.Queue()
+
+        async def step_callback(step):
+            await queue.put({"type": "step", "data": step.dict()})
+
+        async def worker():
+            try:
+                res = await run_real_scanner_pipeline(dataset_id, progress_callback=step_callback)
+                await queue.put({"type": "complete", "result": res.dict()})
+            except Exception as e:
+                await queue.put({"type": "error", "error": str(e)})
+
+        task = asyncio.create_task(worker())
+
+        while True:
+            item = await queue.get()
+            if item["type"] == "step":
+                yield f"data: {json.dumps(item)}\n\n"
+            elif item["type"] == "complete":
+                yield f"data: {json.dumps(item)}\n\n"
+                break
+            elif item["type"] == "error":
+                yield f"data: {json.dumps(item)}\n\n"
+                break
+
+        await task
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@router.post("/projects/{project_id}/scan")
+async def scan_all_project_datasets(project_id: str):
+    """
+    Scans all datasets in the project sequentially on actual disk files.
+    Zero timers or fake delays.
+    """
+    datasets = list_project_datasets(project_id)
+    results = []
+    for ds in datasets:
+        ds_id = ds["dataset_id"]
+        try:
+            res = await run_real_scanner_pipeline(ds_id)
+            results.append(res.dict())
+        except Exception as e:
+            results.append({"dataset_id": ds_id, "error": str(e), "status": "INVALID"})
+
+    return {
+        "project_id": project_id,
+        "scanned_count": len(results),
+        "results": results,
+    }
+
+
+@router.post("/datasets/{dataset_id}/validate")
+async def validate_dataset_real(dataset_id: str):
+    """
+    REAL: Runs the 10-stage scanner pipeline and returns the result.
+    Backwards-compatible with validate callers.
+    """
+    return await scan_dataset_endpoint(dataset_id)
+
+
 @router.get("/datasets/{dataset_id}/validate")
 async def get_validation_result_real(dataset_id: str):
-    """GET convenience endpoint — runs same real validation as POST."""
-    return await validate_dataset_real(dataset_id)
+    """GET convenience endpoint — runs same real scan as POST."""
+    return await scan_dataset_endpoint(dataset_id)
 
 
 # ─────────────────────────────────────────────────────────────────

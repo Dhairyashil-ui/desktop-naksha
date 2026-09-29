@@ -6,6 +6,7 @@ import {
   DatasetTier, 
   calculateReadinessScores 
 } from '../types/naksha';
+import { API_BASE } from '../config/api';
 
 export interface DataInputItem {
   id: string;
@@ -17,13 +18,16 @@ export interface DataInputItem {
   quality: number;           // 2. Validity / Quality: How good is the supplied data
   readyForProcessing: boolean;// Only true when mandatory requirements pass
   filesFound?: number;
+  datasetId?: string;
 }
 
 interface DataInputsScreenProps {
   projectName: string;
+  projectId?: string;
   onBack: () => void;
   onOpenWorkspace?: () => void;
-  onOpenUpload?: (categoryNum: string, categoryName: string, categoryId?: string) => void;
+  onOpenUpload?: (categoryNum: string, categoryName: string, categoryId?: string, datasetId?: string) => void;
+  onOpenScanner?: (categoryNum: string, categoryName: string, categoryId?: string, datasetId?: string) => void;
   onDispatchPipeline?: () => void;
   onOpenCanonicalModel?: () => void;
   externalInputs?: DataInputItem[];
@@ -59,9 +63,11 @@ const CATEGORY_ID_MAP: Record<string, string> = {
 
 export const DataInputsScreen: React.FC<DataInputsScreenProps> = ({ 
   projectName, 
+  projectId,
   onBack, 
   onOpenWorkspace,
   onOpenUpload,
+  onOpenScanner,
   onDispatchPipeline,
   onOpenCanonicalModel,
   externalInputs,
@@ -72,7 +78,6 @@ export const DataInputsScreen: React.FC<DataInputsScreenProps> = ({
   const setInputs = onInputsChange || setInternalInputs;
   const [isScanning, setIsScanning] = useState(false);
   const [hasScanned, setHasScanned] = useState(false);
-  const [activeScanIdx, setActiveScanIdx] = useState<number | null>(null);
 
   // Phase 11 Overall Readiness Engine Calculation
   const readiness = calculateReadinessScores(inputs);
@@ -99,57 +104,63 @@ export const DataInputsScreen: React.FC<DataInputsScreenProps> = ({
     }
   };
 
-  // Scan Data Execution: Evaluates project dataset directory against Phase 11 Readiness Model
-  const handleScanData = () => {
+  // Real Scan Data Execution: Evaluates actual uploaded files on disk via backend scanner
+  const handleScanData = async () => {
     setIsScanning(true);
     setHasScanned(false);
 
-    // Phase 11 Benchmark Verification Dataset Profile
-    // Photogrammetry: 90%, LiDAR: 100%, GIS: 95%, GNSS: 90%, DEM: 80%, BIM: 70%, Property: 100%, Imagery: 90%, Metadata: 100%, Documents: 60%
-    const scanResults: { completeness: number; quality: number; ready: boolean; status: DatasetStatus }[] = [
-      { completeness: 90,  quality: 90,  ready: true,  status: 'Valid' },   // 01 Photogrammetry (Required) -> 90%
-      { completeness: 100, quality: 100, ready: true,  status: 'Valid' },   // 02 LiDAR (Required)          -> 100%
-      { completeness: 95,  quality: 95,  ready: true,  status: 'Valid' },   // 03 GIS (Required)            -> 95%
-      { completeness: 90,  quality: 90,  ready: true,  status: 'Valid' },   // 04 GNSS (Required)           -> 90%
-      { completeness: 80,  quality: 80,  ready: true,  status: 'Partial' }, // 05 DEM (Recommended)         -> 80%
-      { completeness: 70,  quality: 70,  ready: false, status: 'Partial' }, // 06 BIM (Optional)            -> 70%
-      { completeness: 100, quality: 100, ready: true,  status: 'Valid' },   // 07 Property (Required)       -> 100%
-      { completeness: 90,  quality: 90,  ready: true,  status: 'Valid' },   // 08 Imagery (Recommended)     -> 90%
-      { completeness: 100, quality: 100, ready: true,  status: 'Valid' },   // 09 Metadata (Recommended)    -> 100%
-      { completeness: 60,  quality: 60,  ready: false, status: 'Partial' }  // 10 Documents (Optional)      -> 60%
-    ];
+    try {
+      if (projectId) {
+        // Trigger real backend scan across all datasets in project
+        await fetch(`${API_BASE}/api/v2/projects/${projectId}/scan`, { method: 'POST' });
 
-    setInputs(INITIAL_INPUTS);
+        // Retrieve fresh live channel status from PostgreSQL
+        const res = await fetch(`${API_BASE}/api/v2/projects/${projectId}/inputs/live`);
+        if (res.ok) {
+          const liveData = await res.json();
+          if (liveData.channels && Array.isArray(liveData.channels)) {
+            setInputs(prev => prev.map(item => {
+              const ch = liveData.channels.find((c: any) => c.channelNumber === parseInt(item.num, 10));
+              if (ch) {
+                const statusStr: DatasetStatus = 
+                  ch.validationStatus === 'PASSED' || ch.datasetStatus === 'VALID' ? 'Valid' :
+                  ch.validationStatus === 'PARTIAL' || ch.datasetStatus === 'PARTIAL' ? 'Partial' :
+                  ch.datasetStatus === 'INVALID' ? 'Invalid' :
+                  ch.status === 'EMPTY' ? 'Missing' : 'Partial';
 
-    let idx = 0;
-    const interval = setInterval(() => {
-      if (idx < scanResults.length) {
-        setActiveScanIdx(idx);
-        const res = scanResults[idx];
-        setInputs(prev => prev.map((item, i) => 
-          i === idx ? { 
-            ...item, 
-            status: res.status,
-            completeness: res.completeness, 
-            quality: res.quality, 
-            readyForProcessing: res.ready 
-          } : item
-        ));
-        idx++;
-      } else {
-        clearInterval(interval);
-        setActiveScanIdx(null);
-        setIsScanning(false);
-        setHasScanned(true);
+                return {
+                  ...item,
+                  status: statusStr,
+                  completeness: ch.completeness || 0,
+                  quality: ch.quality || 0,
+                  readyForProcessing: (ch.completeness >= 60 && ch.quality >= 70),
+                  datasetId: ch.datasetId,
+                };
+              }
+              return item;
+            }));
+          }
+        }
       }
-    }, 180);
+    } catch (e) {
+      console.error('Scan error:', e);
+    } finally {
+      setIsScanning(false);
+      setHasScanned(true);
+    }
   };
 
   const handleRowClick = (index: number) => {
+    const item = inputs[index];
+    const catId = CATEGORY_ID_MAP[item.num] || `CAT_0${item.num}`;
+
+    if (item.status !== 'Missing' && onOpenScanner) {
+      onOpenScanner(item.num, item.name, catId, item.datasetId);
+      return;
+    }
+
     if (onOpenUpload) {
-      const item = inputs[index];
-      const catId = CATEGORY_ID_MAP[item.num] || `CAT_0${item.num}`;
-      onOpenUpload(item.num, item.name, catId);
+      onOpenUpload(item.num, item.name, catId, item.datasetId);
       return;
     }
 
@@ -214,7 +225,7 @@ export const DataInputsScreen: React.FC<DataInputsScreenProps> = ({
         {/* The 10 Input Types Clean List with Tiers & Statuses */}
         <div className="divide-y divide-zinc-100 border-t border-b border-zinc-100">
           {inputs.map((item, idx) => {
-            const isRowScanning = isScanning && activeScanIdx === idx;
+            const isRowScanning = isScanning && (item.completeness > 0 || item.status !== 'Missing');
             const currentStatus: DatasetStatus = isRowScanning ? 'Scanning' : (item.status || 'Missing');
             const displayLabel = DATASET_STATUS_DISPLAY[currentStatus];
             const hasData = item.completeness > 0 || item.quality > 0;

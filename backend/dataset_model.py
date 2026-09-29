@@ -106,14 +106,14 @@ def infer_file_role(filename: str, category_enum: str, mime_type: str = "") -> s
 
     # 1. Photogrammetry
     if category_enum == "CAT_01_PHOTOGRAMMETRY":
+        if ext in (".jpg", ".jpeg", ".tif", ".tiff", ".png", ".raw", ".dng"):
+            return "AERIAL_IMAGE"
         if any(k in name_lower for k in ("camera", "calib", "lens", "interior_orientation")):
             return "CAMERA_CALIBRATION"
         if any(k in name_lower for k in ("trajectory", "pos", "flight", "nav", "mrk", "exterior")):
             return "TRAJECTORY_DATA"
         if any(k in name_lower for k in ("gcp", "control", "target", "tie_point")):
             return "GROUND_CONTROL_POINTS"
-        if ext in (".jpg", ".jpeg", ".tif", ".tiff", ".png", ".raw", ".dng"):
-            return "AERIAL_IMAGE"
         if ext in (".csv", ".txt", ".tsv"):
             return "COORDINATE_TABLE"
         return "PHOTOGRAMMETRY_AUX"
