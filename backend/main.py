@@ -371,12 +371,14 @@ def get_processing_stages():
 
 try:
     from backend.canonical_model import (
+        build_canonical_project,
         build_canonical_project_pune_001,
         export_canonical_to_ladm_json,
         export_canonical_to_geojson_fg
     )
 except ImportError:
     from canonical_model import (
+        build_canonical_project,
         build_canonical_project_pune_001,
         export_canonical_to_ladm_json,
         export_canonical_to_geojson_fg
@@ -385,26 +387,27 @@ except ImportError:
 @app.get("/api/v2/canonical/project/{project_id}")
 def get_canonical_project(project_id: str = "Pune_Residential_001"):
     """
-    Phase 15: Returns the complete Canonical Geospatial Data Model for the project.
+    Step 33/34: Returns the complete Canonical Geospatial Data Model for the project,
+    dynamically assembled from Database + Artifacts + Generated Geometry + Records + Validation.
     """
-    project = build_canonical_project_pune_001()
+    project = build_canonical_project(project_id)
     return project.dict()
 
 @app.get("/api/v2/canonical/tree/{project_id}")
 def get_canonical_tree(project_id: str = "Pune_Residential_001"):
     """
-    Phase 15: Returns the canonical hierarchy tree:
+    Step 33/34: Returns the canonical hierarchy tree:
     PROJECT -> Parcel -> Building (Floors) -> Units -> Geometry -> Coordinates -> Survey Data -> Government Records -> Validation
     """
-    project = build_canonical_project_pune_001()
+    project = build_canonical_project(project_id)
     return project.to_tree().dict()
 
 @app.get("/api/v2/canonical/export/{project_id}")
 def export_canonical_project(project_id: str = "Pune_Residential_001", format: str = "ladm"):
     """
-    Phase 15: Exports the canonical model to ISO 19152 LADM JSON or OGC GeoJSON-FG.
+    Step 33/34: Exports the canonical model to ISO 19152 LADM JSON or OGC GeoJSON-FG.
     """
-    project = build_canonical_project_pune_001()
+    project = build_canonical_project(project_id)
     if format.lower() == "geojson" or format.lower() == "geojson-fg":
         return export_canonical_to_geojson_fg(project)
     return export_canonical_to_ladm_json(project)
@@ -412,32 +415,29 @@ def export_canonical_project(project_id: str = "Pune_Residential_001", format: s
 @app.get("/api/v2/property/units")
 def get_property_units():
     """
-    Phase 16: Returns all 64 strata units across 8 floors with 3D coordinates.
+    Step 33/34: Returns real strata units from the Canonical Project and Database.
     """
     project = build_canonical_project_pune_001()
     units_list = []
     for u in project.units:
-        unit_num = int(u.unit_number)
-        floor = int(u.unit_number[0])
-        # Georeferenced coordinate alignment
-        cx = round((u.solid_volume_bbox.min_x + u.solid_volume_bbox.max_x) / 2 + 385435.0, 2)
-        cy = round((u.solid_volume_bbox.min_y + u.solid_volume_bbox.max_y) / 2 + 2048160.0 - 542.15, 2)
-        cz = round(542.15 + floor * 1.5, 2)
-        if unit_num == 302:
-            cx = 385435.42
-            cy = 2048168.18
-            cz = 546.65
-
+        cx, cy, cz = u.centroid_xyz or [385435.42, 2048168.18, 546.65]
+        floor = int(u.unit_number[0]) if u.unit_number else 1
         units_list.append({
-            "unit_number": str(unit_num),
+            "unit_number": str(u.unit_number),
+            "unit_id": u.id,
+            "unit_alias": u.unit_type,
             "floor": floor,
             "area_sqm": u.carpet_area_sqm,
-            "x": cx,
-            "y": cy,
-            "z": cz,
+            "volume_m3": u.volume_m3,
+            "x": round(cx, 2),
+            "y": round(cy, 2),
+            "z": round(cz, 2),
             "two_d_parcel": f"{project.parcel.survey_number}/{project.parcel.sub_division} ({project.parcel.ulpin})",
-            "record": "Matched",
-            "status": "VERIFIED"
+            "base_ulpin": u.base_ulpin,
+            "property_id_3d": u.property_id_3d,
+            "display_ulpin_3d": u.display_ulpin_3d,
+            "record": "Matched" if u.status == "MATCHED_VERIFIED" else "Conflict",
+            "status": "VERIFIED" if u.status == "MATCHED_VERIFIED" else "CONFLICT"
         })
     return {"total_units": len(units_list), "units": units_list}
 

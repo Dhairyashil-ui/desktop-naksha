@@ -12,6 +12,22 @@ export interface BoundingBox3D {
   max_z: number;
 }
 
+export interface UnitRecordMatch {
+  status?: string;
+  owner_name?: string;
+  deed_number?: string;
+  discrepancies?: string[];
+  [key: string]: unknown;
+}
+
+export interface UnitValidation {
+  status?: string;
+  overall_score?: number;
+  checks_passed?: number;
+  total_checks?: number;
+  [key: string]: unknown;
+}
+
 export interface CadastralUnit {
   id: string;
   floor_id: string;
@@ -23,6 +39,17 @@ export interface CadastralUnit {
   solid_volume_bbox: BoundingBox3D;
   title_deed_record_id?: string;
   status: string;
+  // Step 34: Real 3D Property Database Attributes
+  footprint_2d?: Record<string, unknown> | null;
+  geometry_3d?: Record<string, unknown> | null;
+  centroid_xyz?: number[] | null;
+  volume_m3?: number | null;
+  base_ulpin?: string | null;
+  property_id_3d?: string | null;
+  display_ulpin_3d?: string | null;
+  survey_source?: string | null;
+  record_match?: UnitRecordMatch | null;
+  validation?: UnitValidation | null;
 }
 
 export interface Floor {
@@ -124,7 +151,25 @@ export interface GovernmentRecords {
   records: RoRRecord[];
 }
 
+export interface ValidationCheckItem {
+  id?: string;
+  name: string;
+  status: 'passed' | 'failed' | 'warning' | string;
+  delta?: string | number;
+  threshold?: string | number;
+  message: string;
+  code?: string;
+  category?: string;
+  details?: string;
+}
+
 export interface ValidationReport {
+  overall_certified: boolean;
+  overall_status?: string;
+  overall_percentage?: number;
+  total_checks_count?: number;
+  passed_checks_count?: number;
+  checks?: ValidationCheckItem[];
   boundary_audit: boolean;
   boundary_delta_m: number;
   coordinates_audit: boolean;
@@ -133,7 +178,6 @@ export interface ValidationReport {
   overlapping_volumes_count: number;
   record_audit: boolean;
   matched_records_ratio: string;
-  overall_certified: boolean;
   iso_19152_compliant: boolean;
 }
 
@@ -342,15 +386,44 @@ export const CANONICAL_PUNE_001: CanonicalProject = {
 /**
  * Returns the Canonical Tree structure for UI rendering
  */
-export function getCanonicalTree(): CanonicalTreeNode {
-  const p = CANONICAL_PUNE_001;
+export function getCanonicalTree(project?: CanonicalProject): CanonicalTreeNode {
+  const p = project || CANONICAL_PUNE_001;
+
+  const unitChildren: CanonicalTreeNode[] = p.units.length <= 16
+    ? p.units.map((u): CanonicalTreeNode => ({
+        id: u.id,
+        name: `Unit ${u.unit_number} (${u.display_ulpin_3d || u.unit_number})`,
+        type: 'UNIT',
+        details: `Carpet: ${u.carpet_area_sqm} m² • Vol: ${u.volume_m3 ? u.volume_m3.toFixed(1) + ' m³' : 'N/A'} • UDS: ${u.undivided_land_share_pct.toFixed(2)}%`,
+        metric: u.status
+      }))
+    : [
+        ...p.units.slice(0, 8).map((u): CanonicalTreeNode => ({
+          id: u.id,
+          name: `Unit ${u.unit_number}`,
+          type: 'UNIT',
+          details: `Carpet: ${u.carpet_area_sqm} m² • Vol: ${u.volume_m3 ? u.volume_m3.toFixed(1) + ' m³' : 'N/A'} • UDS: ${u.undivided_land_share_pct.toFixed(2)}%`,
+          metric: u.status
+        })),
+        {
+          id: 'units_more',
+          name: `... and ${p.units.length - 8} more strata units across ${p.building.floors.length} floors`,
+          type: 'UNIT_SUMMARY',
+          details: `Total: ${p.units.length} units with individual legal titles`,
+          metric: `${p.units.length} Units Total`
+        }
+      ];
+
+  const valMetric = p.validation.overall_percentage !== undefined 
+    ? `${p.validation.overall_percentage}% Passed`
+    : (p.validation.overall_certified ? '✓ Certified' : 'Pending');
 
   return {
     id: p.id,
     name: `PROJECT: ${p.title} (${p.code})`,
     type: 'PROJECT',
     details: `Accuracy: ${p.accuracy_tier} • Org: ${p.organization}`,
-    metric: '100% Ready',
+    metric: p.validation.overall_certified ? '100% Ready' : 'In Review',
     children: [
       {
         id: p.parcel.id,
@@ -377,38 +450,23 @@ export function getCanonicalTree(): CanonicalTreeNode {
         id: 'branch_units',
         name: `Units (${p.units.length} Strata Property Units)`,
         type: 'UNITS_BRANCH',
-        details: '64 Distinct 3D Cadastral Volumetric Units • 100% Title Matched',
+        details: `${p.units.length} Authoritative 3D Cadastral Volumetric Units • Matched & Validated`,
         metric: `${p.units.length} Units`,
-        children: [
-          ...p.units.slice(0, 8).map((u): CanonicalTreeNode => ({
-            id: u.id,
-            name: `Unit ${u.unit_number}`,
-            type: 'UNIT',
-            details: `Carpet: ${u.carpet_area_sqm} m² • UDS: ${u.undivided_land_share_pct.toFixed(2)}%`,
-            metric: u.status
-          })),
-          {
-            id: 'units_more',
-            name: `... and ${p.units.length - 8} more strata units across ${p.building.floors.length} floors`,
-            type: 'UNIT_SUMMARY',
-            details: `Total: ${p.units.length} units with individual legal titles`,
-            metric: '64 Units Total'
-          }
-        ]
+        children: unitChildren
       },
       {
         id: 'branch_geometry',
         name: 'Geometry (LoD-2.2 Solid Mesh & 2D GIS Layers)',
         type: 'GEOMETRY',
         details: `LoD-2 Model GLB • ${p.geometry.total_fused_points.toLocaleString()} Fused Points • ${p.geometry.solid_3d_units_count} 3D Solid Volumes`,
-        metric: 'Watertight Mesh'
+        metric: p.geometry.mesh_topology_watertight ? 'Watertight Mesh' : 'Mesh Processing'
       },
       {
         id: 'branch_coordinates',
         name: `Coordinates (${p.coordinates.target_crs} - ${p.coordinates.target_crs_name})`,
         type: 'COORDINATES',
         details: `Datum: ${p.coordinates.geodetic_datum} • Combined Scale Factor: ${p.coordinates.combined_scale_factor} • ${p.coordinates.gcp_count} GCPs`,
-        metric: '±0.011m Horiz'
+        metric: `±${p.coordinates.horizontal_rmse_m}m Horiz`
       },
       {
         id: 'branch_survey_data',
@@ -421,15 +479,15 @@ export function getCanonicalTree(): CanonicalTreeNode {
         id: 'branch_government_records',
         name: `Government Records (${p.government_records.jurisdiction})`,
         type: 'GOVERNMENT_RECORDS',
-        details: `${p.government_records.matched_records}/${p.government_records.total_records} 7/12 RoR Titles Matched (100% Reconciliation)`,
-        metric: '64 Titles Verified'
+        details: `${p.government_records.matched_records}/${p.government_records.total_records} 7/12 RoR Titles Matched (${p.government_records.match_percentage}% Reconciliation)`,
+        metric: `${p.government_records.matched_records} Titles Verified`
       },
       {
         id: 'branch_validation',
-        name: 'Validation (Four-Pillar Legal Demarcation Audits)',
+        name: 'Validation (Step 32 Cadastral Certification Audits)',
         type: 'VALIDATION',
-        details: '✓ Boundary (±0.008m) • ✓ Coordinates (EPSG:32643) • ✓ Topology (0 Gaps) • ✓ Record (100% Match)',
-        metric: '✓ 4/4 Passed'
+        details: `✓ Boundary (±${p.validation.boundary_delta_m}m) • ✓ Coordinates (${p.validation.coordinates_crs}) • ✓ Topology (${p.validation.overlapping_volumes_count} Overlaps) • ✓ Record (${p.validation.matched_records_ratio})`,
+        metric: valMetric
       }
     ]
   };

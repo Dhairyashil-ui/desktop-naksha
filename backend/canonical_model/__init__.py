@@ -16,7 +16,7 @@ from .models import (
     ValidationReport,
     TreeNode
 )
-from .builder import build_canonical_project_pune_001
+from .builder import build_canonical_project_pune_001, build_canonical_project
 from .exporter import export_canonical_to_ladm_json, export_canonical_to_geojson_fg
 
 __all__ = [
@@ -31,6 +31,7 @@ __all__ = [
     "GovernmentRecords",
     "ValidationReport",
     "TreeNode",
+    "build_canonical_project",
     "build_canonical_project_pune_001",
     "export_canonical_to_ladm_json",
     "export_canonical_to_geojson_fg"
