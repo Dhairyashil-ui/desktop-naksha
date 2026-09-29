@@ -23,7 +23,7 @@ interface DataInputsScreenProps {
   projectName: string;
   onBack: () => void;
   onOpenWorkspace?: () => void;
-  onOpenUpload?: (categoryNum: string, categoryName: string) => void;
+  onOpenUpload?: (categoryNum: string, categoryName: string, categoryId?: string) => void;
   onDispatchPipeline?: () => void;
   onOpenCanonicalModel?: () => void;
   externalInputs?: DataInputItem[];
@@ -42,6 +42,20 @@ export const INITIAL_INPUTS: DataInputItem[] = [
   { id: 'cat_09', num: '09', name: 'Metadata', tier: 'RECOMMENDED', status: 'Missing', completeness: 0, quality: 0, readyForProcessing: false },
   { id: 'cat_10', num: '10', name: 'Documents', tier: 'OPTIONAL', status: 'Missing', completeness: 0, quality: 0, readyForProcessing: false }
 ];
+
+// Map num -> real category ID
+const CATEGORY_ID_MAP: Record<string, string> = {
+  '01': 'CAT_01_PHOTOGRAMMETRY',
+  '02': 'CAT_02_LIDAR_POINT_CLOUD',
+  '03': 'CAT_03_GIS_CAD',
+  '04': 'CAT_04_GNSS_SURVEY',
+  '05': 'CAT_05_DEM_ELEVATION',
+  '06': 'CAT_06_ARCHITECTURAL_BIM',
+  '07': 'CAT_07_PROPERTY_VERTICAL_DATA',
+  '08': 'CAT_08_IMAGERY_ORTHOPHOTO',
+  '09': 'CAT_09_PROJECT_METADATA',
+  '10': 'CAT_10_SUPPORTING_DOCS',
+};
 
 export const DataInputsScreen: React.FC<DataInputsScreenProps> = ({ 
   projectName, 
@@ -133,7 +147,9 @@ export const DataInputsScreen: React.FC<DataInputsScreenProps> = ({
 
   const handleRowClick = (index: number) => {
     if (onOpenUpload) {
-      onOpenUpload(inputs[index].num, inputs[index].name);
+      const item = inputs[index];
+      const catId = CATEGORY_ID_MAP[item.num] || `CAT_0${item.num}`;
+      onOpenUpload(item.num, item.name, catId);
       return;
     }
 

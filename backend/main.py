@@ -2,10 +2,16 @@ import os
 import time
 import json
 import asyncio
+import uuid
+from pathlib import Path
 from typing import Optional, List
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+
+# Load .env before anything else
+from dotenv import load_dotenv
+load_dotenv()
 
 try:
     from backend.operation_logger import operation_logger, LogLevel
@@ -25,6 +31,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── Real Processing Foundation Router ──────────────────────────────
+try:
+    from backend.real_endpoints import router as real_router
+except ImportError:
+    from real_endpoints import router as real_router
+app.include_router(real_router)
 
 # In-memory mock / database bridge
 active_connections: List[WebSocket] = []

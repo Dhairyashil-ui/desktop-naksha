@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { Header } from './components/Header';
 import { Viewport2D3D } from './components/Viewport2D3D';
 import { InputDeck } from './components/InputDeck';
@@ -154,29 +154,76 @@ const INITIAL_PROJECT_STATE: ProjectVirtualState = {
 export const App: React.FC = () => {
   const [currentScreen, setCurrentScreen] = useState<'NEW_PROJECT' | 'DATA_INPUTS' | 'UPLOAD_CATEGORY' | 'SCANNER' | 'PROCESSING' | 'JOB_GRAPH' | 'WORKSPACE' | 'CANONICAL_MODEL' | 'PROPERTY_3D' | 'RECORD_MATCHING' | 'VALIDATION' | 'PACKAGES'>('NEW_PROJECT');
   const [inputs, setInputs] = useState(INITIAL_INPUTS);
-  const [uploadTarget, setUploadTarget] = useState<{ num: string; name: string }>({ num: '01', name: 'Photogrammetry' });
+  const [uploadTarget, setUploadTarget] = useState<{ num: string; name: string; categoryId: string }>({ num: '01', name: 'Photogrammetry', categoryId: 'CAT_01_PHOTOGRAMMETRY' });
   const [project, setProject] = useState<ProjectVirtualState>(INITIAL_PROJECT_STATE);
+  const [projectId, setProjectId] = useState<string>(INITIAL_PROJECT_STATE.projectId);
   const [selectedChannel, setSelectedChannel] = useState<InputChannel | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isArchModalOpen, setIsArchModalOpen] = useState(false);
+  const BACKEND = 'http://127.0.0.1:8000';
 
-  const handleCreateProject = (data: { name: string; location: string; date: string }) => {
-    setProject(prev => ({
-      ...prev,
-      projectCode: data.name.toUpperCase().replace(/\s+/g, '_'),
-      title: data.name
-    }));
+  const handleCreateProject = async (data: { name: string; location: string; date: string }) => {
+    // Try to create a real project in PostgreSQL
+    try {
+      const res = await fetch(`${BACKEND}/api/v2/projects/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: data.name,
+          location: data.location,
+          target_crs_epsg: 32643,
+          accuracy_tier: 'TIER_1_CADASTRAL_LEGAL',
+        }),
+      });
+      if (res.ok) {
+        const created = await res.json();
+        setProjectId(created.project_id);
+        setProject(prev => ({
+          ...prev,
+          projectId: created.project_id,
+          projectCode: created.code,
+          title: created.title,
+        }));
+      } else {
+        // Fallback: update local state only
+        setProject(prev => ({
+          ...prev,
+          projectCode: data.name.toUpperCase().replace(/\s+/g, '_'),
+          title: data.name,
+        }));
+      }
+    } catch {
+      setProject(prev => ({
+        ...prev,
+        projectCode: data.name.toUpperCase().replace(/\s+/g, '_'),
+        title: data.name,
+      }));
+    }
     setCurrentScreen('DATA_INPUTS');
   };
 
-  const handleOpenUpload = (num: string, name: string) => {
-    setUploadTarget({ num, name });
+  // Refresh live input channels from real database after an upload
+  const refreshLiveChannels = useCallback(async () => {
+    try {
+      const res = await fetch(`${BACKEND}/api/v2/projects/${projectId}/inputs/live`);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.channels) {
+        setProject(prev => ({ ...prev, channels: data.channels }));
+      }
+    } catch {}
+  }, [projectId]);
+
+  const handleOpenUpload = (num: string, name: string, categoryId?: string) => {
+    const catId = categoryId || `CAT_0${num}_PHOTOGRAMMETRY`;
+    setUploadTarget({ num, name, categoryId: catId });
     setCurrentScreen('UPLOAD_CATEGORY');
   };
 
   const handleDatasetSaved = (_catNum: string, _datasetInfo: any) => {
-    // After confirming dataset upload, transition to Phase 8 live scanner
-    setCurrentScreen('SCANNER');
+    // Files are now real — refresh live channel statuses then go back to Data Inputs
+    refreshLiveChannels();
+    setCurrentScreen('DATA_INPUTS');
   };
 
   const handleFinishScan = (completeness: number, quality: number, readyForProcessing: boolean, status?: DatasetStatus) => {
@@ -278,13 +325,19 @@ export const App: React.FC = () => {
       );
     }
 
-    // PHASE 7: Category Upload Screen (Drop files here, [ SELECT FILES ], Accepted: JPG • TIFF • PNG • RAW, Group into 1 dataset)
+    // PHASE 7 / RF-1: Category Upload Screen — real file upload to backend
     if (currentScreen === 'UPLOAD_CATEGORY') {
+      // Build the acceptedFormats string from the channel's supported extensions
+      const channel = project.channels.find(c => c.channelNumber === parseInt(uploadTarget.num, 10));
+      const exts = channel?.supportedExtensions || [];
+      const fmtStr = exts.slice(0, 5).map((e: string) => e.replace('.', '').toUpperCase()).join(' • ');
       return (
         <CategoryUploadScreen
           categoryName={uploadTarget.name}
           categoryNum={uploadTarget.num}
-          acceptedFormats="JPG • TIFF • PNG • RAW"
+          categoryId={uploadTarget.categoryId}
+          acceptedFormats={fmtStr || 'JPG • TIFF • PNG • RAW'}
+          projectId={projectId}
           onBack={() => setCurrentScreen('DATA_INPUTS')}
           onDatasetSaved={handleDatasetSaved}
         />

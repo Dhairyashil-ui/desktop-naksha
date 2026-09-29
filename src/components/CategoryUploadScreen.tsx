@@ -1,97 +1,57 @@
-import React, { useState } from 'react';
-import { ArrowLeft, FileImage, Camera, Navigation, Check } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { ArrowLeft, Check, Upload, AlertTriangle, Loader2 } from 'lucide-react';
 
 interface CategoryUploadScreenProps {
   categoryName: string;
   categoryNum: string;
+  categoryId: string;
   acceptedFormats: string;
+  projectId: string;
   onBack: () => void;
   onDatasetSaved: (categoryNum: string, datasetInfo: any) => void;
 }
 
-interface GroupedBundle {
-  datasetName: string;
-  imageCount: number;
-  cameraFile: string | null;
-  gpsFile: string | null;
-  totalFiles: number;
-  fileList: { name: string; type: 'image' | 'camera' | 'gps' | 'other' }[];
+interface UploadState {
+  status: 'idle' | 'uploading' | 'validating' | 'done' | 'error';
+  progress: number;   // 0-100
+  datasetId?: string;
+  datasetName?: string;
+  filesUploaded?: number;
+  totalBytes?: number;
+  validationResult?: any;
+  error?: string;
+  rejected?: { filename: string; reason: string }[];
 }
 
 export const CategoryUploadScreen: React.FC<CategoryUploadScreenProps> = ({
   categoryName = 'Photogrammetry',
   categoryNum = '01',
+  categoryId = 'CAT_01_PHOTOGRAMMETRY',
   acceptedFormats = 'JPG • TIFF • PNG • RAW',
+  projectId,
   onBack,
-  onDatasetSaved
+  onDatasetSaved,
 }) => {
   const [isDragOver, setIsDragOver] = useState(false);
-  const [bundle, setBundle] = useState<GroupedBundle | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [uploadState, setUploadState] = useState<UploadState>({ status: 'idle', progress: 0 });
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Group multiple files into 1 logical dataset
-  const processUploadedFiles = (files: FileList | File[]) => {
-    const fileList: { name: string; type: 'image' | 'camera' | 'gps' | 'other' }[] = [];
-    let imageCount = 0;
-    let cameraFile: string | null = null;
-    let gpsFile: string | null = null;
+  const BACKEND = 'http://127.0.0.1:8000';
 
-    Array.from(files).forEach((file) => {
-      const lower = file.name.toLowerCase();
-
-      // Camera calibration file
-      if (lower.includes('camera') || lower.includes('lens') || lower.includes('calibration')) {
-        cameraFile = file.name;
-        fileList.push({ name: file.name, type: 'camera' });
-      }
-      // GPS / Trajectory file
-      else if (lower.includes('gps') || lower.includes('trajectory') || lower.includes('pos') || lower.endsWith('.pos') || lower.endsWith('.mrk')) {
-        gpsFile = file.name;
-        fileList.push({ name: file.name, type: 'gps' });
-      }
-      // Primary Images
-      else if (lower.endsWith('.jpg') || lower.endsWith('.jpeg') || lower.endsWith('.tif') || lower.endsWith('.tiff') || lower.endsWith('.png') || lower.endsWith('.raw') || lower.endsWith('.dng')) {
-        imageCount++;
-        fileList.push({ name: file.name, type: 'image' });
-      } else {
-        fileList.push({ name: file.name, type: 'other' });
-      }
-    });
-
-    // If user dropped files without camera/gps, provide simulated companion grouping
-    if (imageCount > 0 && !cameraFile && !gpsFile) {
-      cameraFile = 'camera.csv';
-      gpsFile = 'flight_trajectory.pos';
-    }
-
-    setBundle({
-      datasetName: 'Flight_Block_01',
-      imageCount: imageCount > 0 ? imageCount : 100,
-      cameraFile: cameraFile || 'camera.csv',
-      gpsFile: gpsFile || 'flight_trajectory.pos',
-      totalFiles: (imageCount > 0 ? imageCount : 100) + 2,
-      fileList
-    });
+  const humanSize = (bytes: number) => {
+    if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+    return `${(bytes / 1024).toFixed(0)} KB`;
   };
 
-  const handleSimulateStandardUpload = () => {
-    // Exactly matches requirement: 100 images + camera file + GPS file
-    setBundle({
-      datasetName: 'Flight_Block_01',
-      imageCount: 100,
-      cameraFile: 'camera.csv',
-      gpsFile: 'flight_trajectory.pos',
-      totalFiles: 102,
-      fileList: [
-        { name: '100 Imagery Frames (DJI_0001.JPG ... DJI_0100.JPG)', type: 'image' },
-        { name: 'camera.csv (Sensor & Focal Calibration)', type: 'camera' },
-        { name: 'flight_trajectory.pos (PPK/RTK Camera Centers)', type: 'gps' }
-      ]
-    });
+  const processFiles = (files: FileList | File[]) => {
+    setSelectedFiles(Array.from(files));
+    setUploadState({ status: 'idle', progress: 0 });
   };
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      processUploadedFiles(e.target.files);
+      processFiles(e.target.files);
     }
   };
 
@@ -99,38 +59,113 @@ export const CategoryUploadScreen: React.FC<CategoryUploadScreenProps> = ({
     e.preventDefault();
     setIsDragOver(false);
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      processUploadedFiles(e.dataTransfer.files);
+      processFiles(e.dataTransfer.files);
     }
   };
 
-  const handleSave = () => {
-    if (!bundle) return;
-    onDatasetSaved(categoryNum, bundle);
+  const handleUpload = async () => {
+    if (selectedFiles.length === 0) return;
+
+    const datasetName = `${categoryName.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}`;
+    const formData = new FormData();
+    formData.append('dataset_name', datasetName);
+    selectedFiles.forEach(f => formData.append('files', f));
+
+    setUploadState({ status: 'uploading', progress: 10 });
+
+    try {
+      // Upload files
+      const uploadUrl = `${BACKEND}/api/v2/projects/${projectId}/datasets/${categoryId}/upload`;
+      const uploadRes = await fetch(uploadUrl, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!uploadRes.ok) {
+        const err = await uploadRes.json().catch(() => ({ detail: uploadRes.statusText }));
+        throw new Error(err.detail || 'Upload failed');
+      }
+
+      const uploadData = await uploadRes.json();
+      setUploadState({
+        status: 'validating',
+        progress: 60,
+        datasetId: uploadData.dataset_id,
+        datasetName: uploadData.dataset_name,
+        filesUploaded: uploadData.files_saved,
+        totalBytes: uploadData.total_bytes,
+        rejected: uploadData.rejected || [],
+      });
+
+      // Run real file validation
+      const validateRes = await fetch(
+        `${BACKEND}/api/v2/datasets/${uploadData.dataset_id}/validate`,
+        { method: 'POST' }
+      );
+
+      let validationResult = null;
+      if (validateRes.ok) {
+        validationResult = await validateRes.json();
+      }
+
+      setUploadState(prev => ({
+        ...prev,
+        status: 'done',
+        progress: 100,
+        validationResult,
+      }));
+
+    } catch (err: any) {
+      setUploadState(prev => ({
+        ...prev,
+        status: 'error',
+        progress: 0,
+        error: err.message || 'Upload failed',
+      }));
+    }
   };
+
+  const handleConfirm = () => {
+    if (!uploadState.datasetId) return;
+    onDatasetSaved(categoryNum, {
+      dataset_id: uploadState.datasetId,
+      dataset_name: uploadState.datasetName,
+      category_id: categoryId,
+      files_saved: uploadState.filesUploaded,
+      total_bytes: uploadState.totalBytes,
+      validation: uploadState.validationResult,
+    });
+  };
+
+  const reset = () => {
+    setSelectedFiles([]);
+    setUploadState({ status: 'idle', progress: 0 });
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const isUploading = uploadState.status === 'uploading' || uploadState.status === 'validating';
+  const isDone = uploadState.status === 'done';
+  const isError = uploadState.status === 'error';
 
   return (
     <div className="min-h-screen w-full bg-white text-zinc-900 flex flex-col justify-between py-12 px-6 font-sans select-none">
-      {/* Top Bar: Back to Data Inputs */}
+      {/* Top Bar */}
       <div className="w-full max-w-lg mx-auto flex items-center justify-between text-xs text-zinc-400">
-        <button
-          onClick={onBack}
-          className="flex items-center space-x-1.5 hover:text-zinc-900 transition-colors"
-        >
+        <button onClick={onBack} className="flex items-center space-x-1.5 hover:text-zinc-900 transition-colors">
           <ArrowLeft className="w-3.5 h-3.5" />
           <span>DATA INPUTS</span>
         </button>
         <span className="font-mono tracking-[0.2em] font-semibold text-zinc-400">NAKSHA 2.0</span>
       </div>
 
-      {/* Main Core Area */}
+      {/* Main */}
       <div className="w-full max-w-lg mx-auto my-auto py-6">
-        {/* Title */}
         <h1 className="text-xl font-bold tracking-tight text-zinc-900 mb-8 uppercase text-left">
           {categoryName}
         </h1>
 
-        {!bundle ? (
-          /* Dropzone State */
+        {/* Phase: No files selected */}
+        {selectedFiles.length === 0 && !isDone && (
           <div
             onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
             onDragLeave={() => setIsDragOver(false)}
@@ -139,17 +174,12 @@ export const CategoryUploadScreen: React.FC<CategoryUploadScreenProps> = ({
               isDragOver ? 'border-zinc-900 bg-zinc-50' : 'border-zinc-200 hover:border-zinc-400'
             }`}
           >
-            <div className="text-sm font-medium text-zinc-600 mb-4">
-              Drop files here
-            </div>
+            <div className="text-sm font-medium text-zinc-600 mb-4">Drop files here</div>
+            <div className="text-xs text-zinc-400 font-mono mb-4">or</div>
 
-            <div className="text-xs text-zinc-400 font-mono mb-4">
-              or
-            </div>
-
-            {/* Select Files Button */}
             <label className="inline-block cursor-pointer">
               <input
+                ref={fileInputRef}
                 type="file"
                 multiple
                 className="hidden"
@@ -160,90 +190,182 @@ export const CategoryUploadScreen: React.FC<CategoryUploadScreenProps> = ({
               </span>
             </label>
 
-            {/* Accepted Formats */}
             <div className="mt-8 text-xs text-zinc-400">
               <span className="block text-[11px] font-mono uppercase mb-1">Accepted:</span>
               <span className="font-mono text-zinc-600 font-medium">{acceptedFormats}</span>
             </div>
+          </div>
+        )}
 
-            {/* Quick Demo Upload Helper */}
-            <div className="mt-8 pt-6 border-t border-zinc-100">
+        {/* Phase: Files selected, ready to upload */}
+        {selectedFiles.length > 0 && !isUploading && !isDone && (
+          <div className="border border-zinc-200 rounded-xl p-6 bg-zinc-50/50 space-y-4">
+            <div className="text-[10px] font-mono font-semibold tracking-wider text-zinc-400 uppercase">
+              {selectedFiles.length} FILE(S) SELECTED
+            </div>
+
+            <div className="max-h-48 overflow-y-auto space-y-1.5">
+              {selectedFiles.slice(0, 20).map((f, i) => (
+                <div key={i} className="flex items-center justify-between p-2 bg-white rounded-lg border border-zinc-100 text-xs font-mono">
+                  <span className="text-zinc-700 truncate max-w-[200px]">{f.name}</span>
+                  <span className="text-zinc-400 ml-2 shrink-0">{humanSize(f.size)}</span>
+                </div>
+              ))}
+              {selectedFiles.length > 20 && (
+                <div className="text-xs text-zinc-400 font-mono text-center py-1">
+                  + {selectedFiles.length - 20} more files
+                </div>
+              )}
+            </div>
+
+            {isError && (
+              <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700 font-mono">
+                <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                <span>{uploadState.error}</span>
+              </div>
+            )}
+
+            <div className="flex items-center space-x-3 pt-2">
               <button
-                type="button"
-                onClick={handleSimulateStandardUpload}
-                className="text-xs text-zinc-400 hover:text-zinc-900 underline font-mono transition-colors"
+                onClick={reset}
+                className="py-2.5 px-4 text-xs font-mono text-zinc-500 hover:text-zinc-900 transition-colors"
               >
-                + Test: Load 100 images + camera file + GPS file
+                Clear
+              </button>
+              <button
+                onClick={handleUpload}
+                className="flex-1 flex items-center justify-center gap-2 py-3 bg-zinc-900 hover:bg-zinc-800 text-white rounded-lg text-xs font-bold font-mono tracking-wider uppercase transition-all shadow-sm"
+              >
+                <Upload className="w-3.5 h-3.5" />
+                UPLOAD & VALIDATE
               </button>
             </div>
           </div>
-        ) : (
-          /* Grouped Into One Dataset Confirmation View */
-          <div className="border border-zinc-200 rounded-xl p-6 bg-zinc-50/50 space-y-6 animate-in fade-in zoom-in-95">
+        )}
+
+        {/* Phase: Uploading / Validating */}
+        {isUploading && (
+          <div className="border border-zinc-200 rounded-xl p-8 bg-zinc-50/50 space-y-6 text-center">
+            <Loader2 className="w-8 h-8 text-zinc-400 animate-spin mx-auto" />
             <div>
-              <div className="text-[10px] font-mono font-semibold tracking-wider text-zinc-400 uppercase">
-                DATASET CREATED (1 LOGICAL DATASET)
+              <div className="text-sm font-bold text-zinc-900 mb-1">
+                {uploadState.status === 'uploading' ? 'Uploading files...' : 'Validating dataset...'}
               </div>
-              <h2 className="text-base font-bold text-zinc-900 mt-0.5">
-                {bundle.datasetName}
-              </h2>
-            </div>
-
-            {/* Grouped Contents */}
-            <div className="space-y-2.5 text-xs font-mono">
-              <div className="flex items-center justify-between p-2.5 bg-white rounded-lg border border-zinc-100">
-                <span className="flex items-center gap-2 text-zinc-700">
-                  <FileImage className="w-3.5 h-3.5 text-zinc-400" />
-                  Images
-                </span>
-                <span className="font-semibold text-zinc-900">{bundle.imageCount} files</span>
-              </div>
-
-              <div className="flex items-center justify-between p-2.5 bg-white rounded-lg border border-zinc-100">
-                <span className="flex items-center gap-2 text-zinc-700">
-                  <Camera className="w-3.5 h-3.5 text-zinc-400" />
-                  Camera File
-                </span>
-                <span className="font-semibold text-zinc-900">{bundle.cameraFile}</span>
-              </div>
-
-              <div className="flex items-center justify-between p-2.5 bg-white rounded-lg border border-zinc-100">
-                <span className="flex items-center gap-2 text-zinc-700">
-                  <Navigation className="w-3.5 h-3.5 text-zinc-400" />
-                  GPS / Trajectory
-                </span>
-                <span className="font-semibold text-zinc-900">{bundle.gpsFile}</span>
+              <div className="text-xs text-zinc-400 font-mono">
+                {uploadState.status === 'uploading'
+                  ? `Sending ${selectedFiles.length} file(s) to backend`
+                  : 'Reading file headers, checking CRS, analysing content'
+                }
               </div>
             </div>
+            <div className="w-full bg-zinc-100 rounded-full h-1.5">
+              <div
+                className="bg-zinc-900 h-1.5 rounded-full transition-all duration-500"
+                style={{ width: `${uploadState.progress}%` }}
+              />
+            </div>
+          </div>
+        )}
 
-            <div className="pt-2 text-[11px] text-zinc-500 font-mono flex items-center gap-1.5">
-              <Check className="w-3.5 h-3.5 text-zinc-900" />
-              <span>System bound {bundle.totalFiles} files into 1 coherent dataset.</span>
+        {/* Phase: Done */}
+        {isDone && (
+          <div className="border border-zinc-200 rounded-xl p-6 bg-zinc-50/50 space-y-5">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-full bg-zinc-900 flex items-center justify-center shrink-0">
+                <Check className="w-4 h-4 text-white" />
+              </div>
+              <div>
+                <div className="text-sm font-bold text-zinc-900">Upload Complete</div>
+                <div className="text-xs text-zinc-400 font-mono mt-0.5">
+                  {uploadState.filesUploaded} file(s) — {humanSize(uploadState.totalBytes || 0)} stored on server
+                </div>
+              </div>
             </div>
 
-            {/* Actions */}
-            <div className="pt-2 flex items-center space-x-3">
-              <button
-                onClick={() => setBundle(null)}
-                className="py-2.5 px-4 text-xs font-mono text-zinc-500 hover:text-zinc-900 transition-colors"
-              >
+            {/* Validation Summary */}
+            {uploadState.validationResult && (
+              <div className="space-y-2">
+                <div className="text-[10px] font-mono uppercase tracking-wider text-zinc-400 font-semibold">
+                  Validation Results
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="bg-white border border-zinc-100 rounded-lg p-2.5 text-center">
+                    <div className="text-lg font-bold text-zinc-900">
+                      {uploadState.validationResult.quality_score?.toFixed(0)}%
+                    </div>
+                    <div className="text-[10px] text-zinc-400 font-mono">Quality</div>
+                  </div>
+                  <div className="bg-white border border-zinc-100 rounded-lg p-2.5 text-center">
+                    <div className={`text-sm font-bold ${uploadState.validationResult.ready_for_processing ? 'text-zinc-900' : 'text-amber-600'}`}>
+                      {uploadState.validationResult.ready_for_processing ? 'READY' : 'WARNINGS'}
+                    </div>
+                    <div className="text-[10px] text-zinc-400 font-mono">Status</div>
+                  </div>
+                </div>
+
+                {/* CRS / Points detected */}
+                {(uploadState.validationResult.crs_detected || uploadState.validationResult.point_count) && (
+                  <div className="bg-white border border-zinc-100 rounded-lg p-2.5 text-xs font-mono space-y-1">
+                    {uploadState.validationResult.crs_detected && (
+                      <div className="flex justify-between">
+                        <span className="text-zinc-500">CRS detected</span>
+                        <span className="text-zinc-900 font-semibold">{uploadState.validationResult.crs_detected}</span>
+                      </div>
+                    )}
+                    {uploadState.validationResult.point_count && (
+                      <div className="flex justify-between">
+                        <span className="text-zinc-500">Point count</span>
+                        <span className="text-zinc-900 font-semibold">{uploadState.validationResult.point_count.toLocaleString()}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Validation checks */}
+                <div className="space-y-1.5 max-h-32 overflow-y-auto">
+                  {uploadState.validationResult.checks?.map((c: any, i: number) => (
+                    <div key={i} className="flex items-center justify-between p-2 bg-white rounded-lg border border-zinc-100 text-xs font-mono">
+                      <span className="text-zinc-600">{c.check}</span>
+                      <span className={`font-semibold ${
+                        c.status === 'pass' ? 'text-zinc-900' :
+                        c.status === 'warning' ? 'text-amber-600' : 'text-red-600'
+                      }`}>
+                        {c.value || c.status.toUpperCase()}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Rejected files */}
+                {uploadState.rejected && uploadState.rejected.length > 0 && (
+                  <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-xs font-mono text-amber-800">
+                    <div className="font-semibold mb-1">{uploadState.rejected.length} file(s) rejected:</div>
+                    {uploadState.rejected.slice(0, 3).map((r, i) => (
+                      <div key={i}>• {r.filename}: {r.reason}</div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="flex items-center space-x-3 pt-1">
+              <button onClick={reset} className="py-2.5 px-4 text-xs font-mono text-zinc-500 hover:text-zinc-900 transition-colors">
                 Re-upload
               </button>
-
               <button
-                onClick={handleSave}
+                onClick={handleConfirm}
                 className="flex-1 py-3 bg-zinc-900 hover:bg-zinc-800 text-white rounded-lg text-xs font-bold font-mono tracking-wider uppercase transition-all shadow-sm"
               >
-                CONFIRM DATASET
+                CONFIRM DATASET →
               </button>
             </div>
           </div>
         )}
       </div>
 
-      {/* Minimal Footer */}
+      {/* Footer */}
       <div className="w-full max-w-lg mx-auto text-center text-[11px] font-mono text-zinc-400">
-        One category is not one file • Phase 7
+        Files are saved to server storage • SHA-256 verified • Phase RF-1
       </div>
     </div>
   );
