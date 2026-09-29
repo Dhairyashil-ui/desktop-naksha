@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { ArrowLeft, Check, Download, Loader2 } from 'lucide-react';
+import { API_BASE } from '../config/api';
 
 interface OutputScreenProps {
   onBack?: () => void;
@@ -23,7 +24,7 @@ export const OutputScreen: React.FC<OutputScreenProps> = ({ onBack }) => {
     setDownloadingId(id);
     
     // Trigger download via anchor
-    const downloadUrl = `/api/v2/packages/download/${id}`;
+    const downloadUrl = `${API_BASE}/api/v2/packages/download/${id}`;
     const a = document.createElement('a');
     a.href = downloadUrl;
     a.download = `${label.toLowerCase().replace(/\s+/g, '_')}_package.zip`;
@@ -40,7 +41,7 @@ export const OutputScreen: React.FC<OutputScreenProps> = ({ onBack }) => {
   const handleDownloadAll = () => {
     setDownloadingAll(true);
 
-    const downloadUrl = `/api/v2/packages/download-all`;
+    const downloadUrl = `${API_BASE}/api/v2/packages/download-all`;
     const a = document.createElement('a');
     a.href = downloadUrl;
     a.download = `NAKSHA_ALL_DELIVERABLES.zip`;

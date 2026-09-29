@@ -12,12 +12,22 @@ import io
 import shutil
 from typing import Optional, Dict, Any
 
-S3_ENDPOINT = os.getenv("S3_ENDPOINT", "http://localhost:9000")
-S3_ACCESS_KEY = os.getenv("S3_ACCESS_KEY", "minioadmin")
-S3_SECRET_KEY = os.getenv("S3_SECRET_KEY", "minioadmin")
-S3_BUCKET_RAW = os.getenv("S3_BUCKET_RAW", "naksha-raw")
-S3_BUCKET_PROCESSED = os.getenv("S3_BUCKET_PROCESSED", "naksha-processed")
-S3_BUCKET_PACKAGES = os.getenv("S3_BUCKET_PACKAGES", "naksha-packages")
+from dotenv import load_dotenv
+
+# Load .env file
+_project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_env_file = os.path.join(_project_root, ".env")
+if os.path.exists(_env_file):
+    load_dotenv(dotenv_path=_env_file)
+else:
+    load_dotenv()
+
+S3_ENDPOINT = os.getenv("STORAGE_ENDPOINT", os.getenv("S3_ENDPOINT", "http://localhost:9000"))
+S3_ACCESS_KEY = os.getenv("STORAGE_ACCESS_KEY", os.getenv("S3_ACCESS_KEY", ""))
+S3_SECRET_KEY = os.getenv("STORAGE_SECRET_KEY", os.getenv("S3_SECRET_KEY", ""))
+S3_BUCKET_RAW = os.getenv("STORAGE_BUCKET_RAW", os.getenv("S3_BUCKET_RAW", "naksha-raw"))
+S3_BUCKET_PROCESSED = os.getenv("STORAGE_BUCKET_PROCESSED", os.getenv("S3_BUCKET_PROCESSED", "naksha-processed"))
+S3_BUCKET_PACKAGES = os.getenv("STORAGE_BUCKET_PACKAGES", os.getenv("S3_BUCKET_PACKAGES", "naksha-packages"))
 
 # Local cache storage root for desktop shell
 LOCAL_STORAGE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "storage_cache")
@@ -30,6 +40,28 @@ class ObjectStorageClient:
         self._init_client()
 
     def _init_client(self):
+        if not S3_ACCESS_KEY or not S3_SECRET_KEY:
+            self.is_connected = False
+            return
+
+        # Quick 0.2s non-blocking socket probe before invoking boto3
+        import urllib.parse
+        import socket
+        try:
+            parsed = urllib.parse.urlparse(self.endpoint)
+            host = parsed.hostname or "127.0.0.1"
+            port = parsed.port or 9000
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(0.2)
+            err = sock.connect_ex((host, port))
+            sock.close()
+            if err != 0:
+                self.is_connected = False
+                return
+        except Exception:
+            self.is_connected = False
+            return
+
         try:
             import boto3
             from botocore.config import Config
@@ -38,9 +70,13 @@ class ObjectStorageClient:
                 endpoint_url=self.endpoint,
                 aws_access_key_id=S3_ACCESS_KEY,
                 aws_secret_access_key=S3_SECRET_KEY,
-                config=Config(signature_version='s3v4', connect_timeout=2, read_timeout=2)
+                config=Config(
+                    signature_version='s3v4',
+                    connect_timeout=0.5,
+                    read_timeout=0.5,
+                    retries={'max_attempts': 0}
+                )
             )
-            # Ping bucket list
             self.s3.list_buckets()
             self.is_connected = True
         except Exception:

@@ -263,7 +263,7 @@ export const App: React.FC = () => {
   const handleDispatchPipeline = () => {
     setIsProcessing(true);
     // Dispatch real backend background job to worker queue
-    fetch('/api/v2/jobs/dispatch', { method: 'POST' }).catch(() => {});
+    fetch(`${BACKEND}/api/v2/jobs/dispatch`, { method: 'POST' }).catch(() => {});
 
     // Mark Photogrammetry as Processing
     setInputs(prev => prev.map(item => 

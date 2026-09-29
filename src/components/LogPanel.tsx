@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Terminal, X, ChevronDown, Filter, Circle } from 'lucide-react';
+import { API_BASE, WS_BASE } from '../config/api';
 
 /* ─── Types ────────────────────────────────────────────────── */
 export type LogLevel = 'INFO' | 'SUCCESS' | 'WARNING' | 'ERROR' | 'DEBUG';
@@ -74,7 +75,7 @@ export const LogPanel: React.FC = () => {
   /* WebSocket connection to /ws/logs */
   useEffect(() => {
     // Fetch backlog from REST
-    fetch('/api/v2/logs?limit=100')
+    fetch(`${API_BASE}/api/v2/logs?limit=100`)
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (data?.entries?.length) {
@@ -85,8 +86,7 @@ export const LogPanel: React.FC = () => {
 
     // Real-time WebSocket
     try {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const ws = new WebSocket(`${protocol}//${window.location.host}/ws/logs`);
+      const ws = new WebSocket(`${WS_BASE}/ws/logs`);
       wsRef.current = ws;
 
       ws.onmessage = (evt) => {

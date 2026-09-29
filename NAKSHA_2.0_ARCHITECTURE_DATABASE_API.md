@@ -51,11 +51,11 @@ In Phase 21, the complete enterprise topology connects the native Tauri Desktop 
 ## 2. Live Database Infrastructure (PostgreSQL 17.6 + PostGIS 3.3.7)
 
 ### 2.1 Connection Credentials & Dual-Stack Resolution
-- **Direct URI:** `postgresql://postgres:y5Q!Rz8._Gbwfv6@db.uztiolyrcmrahgvybbdv.supabase.co:5432/postgres`
-- **IPv4 Connection Pooler:** `postgresql://postgres.uztiolyrcmrahgvybbdv:y5Q!Rz8._Gbwfv6@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres`
+- **Direct URI Template:** `postgresql://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}`
+- **IPv4 Connection Pooler Template:** `postgresql://${DB_POOLER_USER}:${DB_PASSWORD}@${DB_POOLER_HOST}:${DB_PORT}/${DB_NAME}`
 - **Engine:** PostgreSQL 17.6 on aarch64-unknown-linux-gnu
 - **Spatial Extension:** PostGIS 3.3.7 (with `uuid-ossp`, `pgcrypto`, `btree_gist`)
-- **Connection Management:** Handled dynamically by [`backend/database.py`](file:///d:/surveynaksha/backend/database.py) with automatic IPv6 direct / IPv4 pooler failover.
+- **Connection Management:** Handled dynamically via environment variables in `.env` and [`backend/database.py`](file:///d:/surveynaksha/backend/database.py) with automatic IPv6 direct / IPv4 pooler failover.
 
 ### 2.2 Active Database Schema (18 Relational & PostGIS Tables)
 Applied directly via [`backend/migrate.py`](file:///d:/surveynaksha/backend/migrate.py) from [`schema.sql`](file:///d:/surveynaksha/schema.sql):

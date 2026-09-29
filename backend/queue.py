@@ -25,14 +25,29 @@ class TaskQueueBroker:
         self.active_jobs: Dict[str, Dict[str, Any]] = {}
 
     def _init_redis(self):
+        # Quick non-blocking socket probe before connecting to redis
+        import socket
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(0.15)
+            err = sock.connect_ex((REDIS_HOST, REDIS_PORT))
+            sock.close()
+            if err != 0:
+                self.is_connected = False
+                return
+        except Exception:
+            self.is_connected = False
+            return
+
         try:
             import redis
             self.r = redis.Redis(
                 host=REDIS_HOST,
                 port=REDIS_PORT,
                 db=REDIS_DB,
-                socket_timeout=1,
-                socket_connect_timeout=1
+                socket_timeout=0.5,
+                socket_connect_timeout=0.5,
+                retry_on_timeout=False
             )
             self.r.ping()
             self.is_connected = True

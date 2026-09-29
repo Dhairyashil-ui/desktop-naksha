@@ -12,7 +12,10 @@ export const ArchitectureModal: React.FC<ArchitectureModalProps> = ({ isOpen, on
 
   const fetchStatus = () => {
     setIsLoading(true);
-    fetch('/api/v2/database/health')
+    const backendUrl = typeof window !== 'undefined' && (window.location.protocol === 'file:' || window.location.protocol.startsWith('tauri'))
+      ? 'http://127.0.0.1:8000'
+      : '';
+    fetch(`${backendUrl}/api/v2/database/health`)
       .then(r => r.json())
       .then(health => {
         setDbHealth(health);
@@ -110,8 +113,8 @@ export const ArchitectureModal: React.FC<ArchitectureModalProps> = ({ isOpen, on
 
             {/* Direct URI Display */}
             <div className="mt-3 pt-3 border-t border-zinc-200/70 text-[11px] text-zinc-500 font-mono truncate">
-              <span className="text-zinc-400">Direct URI: </span>
-              <span className="text-zinc-700">postgresql://postgres:***@db.uztiolyrcmrahgvybbdv.supabase.co:5432/postgres</span>
+              <span className="text-zinc-400">Connection Endpoint: </span>
+              <span className="text-zinc-700">postgresql://{dbHealth?.host_active ? `postgres:***@${dbHealth.host_active}:${dbHealth.port_active || 5432}/${dbHealth.database || 'postgres'}` : 'Configured via .env'}</span>
             </div>
           </div>
 

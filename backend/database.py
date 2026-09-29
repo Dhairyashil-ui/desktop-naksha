@@ -1,47 +1,59 @@
 """
 Naksha 2.0 — Database Layer (Phase 21)
-PostgreSQL 17+ with PostGIS 3.3+ Connection Manager
-Configured for Supabase:
-- Direct: postgresql://postgres:y5Q!Rz8._Gbwfv6@db.uztiolyrcmrahgvybbdv.supabase.co:5432/postgres
-- IPv4 Pooler: postgresql://postgres.uztiolyrcmrahgvybbdv:y5Q!Rz8._Gbwfv6@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres
+PostgreSQL 17+ with PostGIS 3.3+ Connection Manager.
+All connection parameters and credentials are read strictly from environment configuration (.env).
+Never hardcode credentials or secrets in source code.
 """
 
 import os
 import time
 import socket
 from typing import Generator, Dict, Any, Optional
+from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 
-# Supabase Credentials provided in Phase 21
-SUPABASE_USER = os.getenv("DB_USER", "postgres")
-SUPABASE_PASSWORD = os.getenv("DB_PASSWORD", "y5Q!Rz8._Gbwfv6")
-SUPABASE_HOST = os.getenv("DB_HOST", "db.uztiolyrcmrahgvybbdv.supabase.co")
-SUPABASE_PORT = int(os.getenv("DB_PORT", "5432"))
-SUPABASE_NAME = os.getenv("DB_NAME", "postgres")
+# Load .env file from project root or current working directory
+_project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_env_file = os.path.join(_project_root, ".env")
+if os.path.exists(_env_file):
+    load_dotenv(dotenv_path=_env_file)
+else:
+    load_dotenv()
 
-# IPv4 Pooler Configuration (Supabase AWS AP-SOUTHEAST-1 Singapore)
-POOLER_HOST = os.getenv("DB_POOLER_HOST", "aws-0-ap-southeast-1.pooler.supabase.com")
-POOLER_USER = os.getenv("DB_POOLER_USER", "postgres.uztiolyrcmrahgvybbdv")
+DB_USER = os.getenv("DB_USER", "postgres")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "")
+DB_HOST = os.getenv("DB_HOST", "localhost")
+DB_PORT = int(os.getenv("DB_PORT", "5432"))
+DB_NAME = os.getenv("DB_NAME", "postgres")
+
+# Optional Pooler Configuration
+POOLER_HOST = os.getenv("DB_POOLER_HOST", "")
+POOLER_USER = os.getenv("DB_POOLER_USER", "")
 POOLER_PORT = int(os.getenv("DB_POOLER_PORT", "5432"))
 
 def get_database_url() -> str:
     """
-    Determines optimal connection URL.
-    Attempts direct connection; if IPv6 DNS fails or is unreachable,
-    falls back seamlessly to the verified IPv4 pooler.
+    Determines optimal connection URL from environment variables.
+    Prioritizes explicit DATABASE_URL if provided in .env.
+    Otherwise builds from DB_USER, DB_PASSWORD, DB_HOST, DB_PORT, DB_NAME.
     """
-    # Check if direct host resolves to IPv4 or reachable IPv6
-    try:
-        addrinfo = socket.getaddrinfo(SUPABASE_HOST, SUPABASE_PORT, socket.AF_UNSPEC, socket.SOCK_STREAM)
-        has_ipv4 = any(a[0] == socket.AF_INET for a in addrinfo)
-        if has_ipv4:
-            return f"postgresql://{SUPABASE_USER}:{SUPABASE_PASSWORD}@{SUPABASE_HOST}:{SUPABASE_PORT}/{SUPABASE_NAME}"
-    except Exception:
-        pass
+    env_url = os.getenv("DATABASE_URL")
+    if env_url:
+        return env_url
 
-    # Default to IPv4 session pooler (port 5432) for bulletproof connectivity
-    return f"postgresql://{POOLER_USER}:{SUPABASE_PASSWORD}@{POOLER_HOST}:{POOLER_PORT}/{SUPABASE_NAME}"
+    # Check if direct host resolves to IPv4 or reachable IPv6
+    if POOLER_HOST and POOLER_USER:
+        try:
+            addrinfo = socket.getaddrinfo(DB_HOST, DB_PORT, socket.AF_UNSPEC, socket.SOCK_STREAM)
+            has_ipv4 = any(a[0] == socket.AF_INET for a in addrinfo)
+            if has_ipv4:
+                return f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+        except Exception:
+            pass
+        return f"postgresql://{POOLER_USER}:{DB_PASSWORD}@{POOLER_HOST}:{POOLER_PORT}/{DB_NAME}"
+
+    return f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
 DATABASE_URL = get_database_url()
 

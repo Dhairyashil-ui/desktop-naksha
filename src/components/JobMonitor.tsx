@@ -7,6 +7,7 @@ import {
   RefreshCw, 
   Cpu
 } from 'lucide-react';
+import { API_BASE, WS_BASE } from '../config/api';
 
 export interface StageItem {
   name: string;
@@ -56,7 +57,7 @@ export const JobMonitor: React.FC = () => {
     let isSubscribed = true;
 
     const fetchLatestJob = () => {
-      fetch('/api/v2/jobs/JOB%20%231024')
+      fetch(`${API_BASE}/api/v2/jobs/JOB%20%231024`)
         .then(res => {
           if (!res.ok) throw new Error('Not found');
           return res.json();
@@ -75,8 +76,7 @@ export const JobMonitor: React.FC = () => {
 
     // Setup real-time WebSocket connection
     try {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${protocol}//${window.location.host}/ws/jobs/JOB%20%231024`;
+      const wsUrl = `${WS_BASE}/ws/jobs/JOB%20%231024`;
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
@@ -112,7 +112,7 @@ export const JobMonitor: React.FC = () => {
 
   const handleDispatchNewJob = () => {
     setIsDispatching(true);
-    fetch('/api/v2/jobs/dispatch', { method: 'POST' })
+    fetch(`${API_BASE}/api/v2/jobs/dispatch`, { method: 'POST' })
       .then(res => res.json())
       .then(data => {
         setIsDispatching(false);

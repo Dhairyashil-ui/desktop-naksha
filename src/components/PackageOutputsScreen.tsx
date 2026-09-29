@@ -15,6 +15,7 @@ import {
   HardDrive
 } from 'lucide-react';
 import { DeliverablePackage, PackageConstituent } from '../types/packages';
+import { API_BASE } from '../config/api';
 
 interface PackageOutputsScreenProps {
   onBack?: () => void;
@@ -33,7 +34,7 @@ export const PackageOutputsScreen: React.FC<PackageOutputsScreenProps> = ({
 
   // Fetch package list from API
   useEffect(() => {
-    fetch('/api/v2/packages')
+    fetch(`${API_BASE}/api/v2/packages`)
       .then(res => res.json())
       .then(data => {
         if (data.packages) {
@@ -76,7 +77,7 @@ export const PackageOutputsScreen: React.FC<PackageOutputsScreenProps> = ({
     setDownloadSuccessMessage(`Exporting ${pkg.name} (${pkg.format_label})...`);
     
     // Create an anchor link to trigger download endpoint
-    const downloadUrl = `/api/v2/packages/download/${pkg.id}`;
+    const downloadUrl = `${API_BASE}/api/v2/packages/download/${pkg.id}`;
     const a = document.createElement('a');
     a.href = downloadUrl;
     a.download = `${pkg.id}.zip`;
