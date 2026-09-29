@@ -476,16 +476,21 @@ except ImportError:
 @app.get("/api/v2/records/matching/summary")
 def get_record_matching_summary():
     """
-    Phase 17: Returns the record matching summary across all units.
+    Step 31: Returns the real record matching summary across all units:
+    Matches, Conflicts (e.g. area/floor discrepancy), and Unresolved (unregistered) records.
     """
     catalog = get_canonical_record_matching_catalog()
-    matched_count = sum(1 for u in catalog if u.is_matched)
-    mismatch_count = len(catalog) - matched_count
+    matched_count = sum(1 for u in catalog if u.match_status == "MATCH")
+    conflict_count = sum(1 for u in catalog if u.match_status == "CONFLICT")
+    unresolved_count = sum(1 for u in catalog if u.match_status == "UNRESOLVED")
+    mismatch_count = conflict_count + unresolved_count
     return {
         "total_units": len(catalog),
         "matched_count": matched_count,
+        "conflict_count": conflict_count,
+        "unresolved_count": unresolved_count,
         "mismatch_count": mismatch_count,
-        "match_percentage": round((matched_count / len(catalog)) * 100, 1),
+        "match_percentage": round((matched_count / max(len(catalog), 1)) * 100, 1),
         "units": [u.dict() for u in catalog]
     }
 

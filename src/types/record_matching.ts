@@ -1,6 +1,7 @@
 /**
  * Record Matching Domain Types
- * Phase 17: Connect the 3D property to government land records
+ * Phase 17 / Step 31: Real property-record matching:
+ * 3D Unit + 2D Parcel + Property Record + Floor/Unit Record -> Match / Conflict / Unresolved.
  */
 
 export interface AttributeCheckItem {
@@ -12,11 +13,21 @@ export interface AttributeCheckItem {
   notes?: string;
 }
 
+export interface SpatialCheckItem {
+  checkName: string;
+  isPassed: boolean;
+  details: string;
+  metrics?: Record<string, any>;
+}
+
 export interface UnitRecordMatchData {
   unitNumber: string;
+  unitId?: string;
+  unitAlias?: string;
   floor: number;
+  matchStatus?: 'MATCH' | 'CONFLICT' | 'UNRESOLVED';
   isMatched: boolean;
-  statusBadge: '✓ RECORD MATCHED' | '⚠ RECORD MISMATCH';
+  statusBadge: string;
   unit: {
     unitNumber: string;
     floor: number;
@@ -40,5 +51,17 @@ export interface UnitRecordMatchData {
     parcel: string;
   };
   checks: AttributeCheckItem[];
+  spatialChecks?: SpatialCheckItem[];
   mismatchReason?: string;
+  remediationSuggestion?: string;
+}
+
+export interface RecordMatchingSummaryResponse {
+  total_units: number;
+  matched_count: number;
+  conflict_count: number;
+  unresolved_count: number;
+  mismatch_count: number;
+  match_percentage: number;
+  units: UnitRecordMatchData[];
 }
