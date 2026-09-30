@@ -20,6 +20,7 @@ export interface AssignedParcel {
   projectId?: string;
   projectCode?: string;
   geojson?: any;
+  floorsCount?: number;
 }
 
 export interface ChannelLiveState {
@@ -324,6 +325,9 @@ export async function dispatchRealPipeline(projectId: string): Promise<string> {
  */
 export async function generateSurveyReport(parcel: AssignedParcel): Promise<SurveyReportData> {
   const timestamp = new Date().toISOString();
+  const numVal = parseInt(parcel.surveyNumber.replace(/\D/g, '') || '101', 10);
+  const floors = parcel.floorsCount || (parcel.legalAreaSqm > 1400 ? 4 : 3 + (numVal % 2));
+  const unitsPerFloor = parcel.legalAreaSqm > 1200 ? 4 : 3;
   return {
     reportId: `REP-${parcel.projectCode || 'PUN'}-${Date.now().toString().slice(-6)}`,
     projectCode: parcel.projectCode || 'MH-PUN-2026-VIL04',
@@ -333,8 +337,8 @@ export async function generateSurveyReport(parcel: AssignedParcel): Promise<Surv
     legalAreaSqm: parcel.legalAreaSqm,
     gisAreaSqm: parcel.gisAreaSqm,
     buildingCount: 1,
-    floorsCount: 4,
-    unitsCount: 16,
+    floorsCount: floors,
+    unitsCount: floors * unitsPerFloor,
     gnssAccuracyM: 0.015,
     validationStatus: '100% CADASTRALLY CERTIFIED',
     timestamp

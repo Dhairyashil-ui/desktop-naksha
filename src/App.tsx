@@ -217,8 +217,8 @@ export const App: React.FC = () => {
             legalAreaSqm: activeParcel.legalAreaSqm,
             gisAreaSqm: activeParcel.gisAreaSqm,
             buildingCount: 1,
-            floorsCount: 4,
-            unitsCount: 10,
+            floorsCount: activeParcel.floorsCount || (activeParcel.legalAreaSqm > 1400 ? 4 : 3),
+            unitsCount: (activeParcel.floorsCount || (activeParcel.legalAreaSqm > 1400 ? 4 : 3)) * (activeParcel.legalAreaSqm > 1200 ? 4 : 3),
             gnssAccuracyM: 0.015,
             validationStatus: '100% CADASTRALLY CERTIFIED',
             timestamp: new Date().toISOString()

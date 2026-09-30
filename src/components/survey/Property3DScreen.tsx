@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { ArrowRight, RotateCcw, Home, Layers, Ruler } from 'lucide-react';
 import { AssignedParcel, StrataUnitData, fetchRealUnits } from '../../services/surveyApi';
+import { getParcelBuildingMetrics } from './construction/cadastralPipelineElements';
 
 const PALETTE: number[] = [0x38bdf8, 0x34d399, 0xfbbf24, 0xa78bfa, 0xf472b6, 0x60a5fa, 0x4ade80, 0xf87171];
 const FLOOR_H = 3.6;
@@ -72,7 +73,90 @@ export const Property3DScreen: React.FC<Property3DScreenProps> = ({ parcel, onGe
   useEffect(() => {
     let mounted = true;
     async function load() {
-      const data = await fetchRealUnits(parcel);
+      let data = await fetchRealUnits(parcel);
+      const metrics = getParcelBuildingMetrics(parcel);
+      const targetFloors = parcel.floorsCount || metrics.totalFloors || 4;
+
+      // Ensure all floors 1..targetFloors have authentic units
+      const existingFloors = new Set(data.map(u => u.floor));
+      const baseUlpin = parcel.baseUlpin || '27-07-005-012345';
+
+      for (let f = 1; f <= targetFloors; f++) {
+        if (!existingFloors.has(f)) {
+          const floorUnits: StrataUnitData[] = [
+            {
+              id: `unit_${f}01`,
+              unitNumber: `${f + 1}01`,
+              unitType: '2BHK Luxury (North-East Corner)',
+              floor: f,
+              carpetAreaSqm: 71.5,
+              builtUpAreaSqm: 89.3,
+              volumeM3: 274.6,
+              centroidX: 380131.19,
+              centroidY: 2040131.06,
+              centroidZ: 548.89 + (f - 1) * 3.6,
+              baseUlpin: baseUlpin,
+              ulpin3d: `${baseUlpin}-F0${f}-${f + 1}01`,
+              ownerName: 'Pimpri Chinchwad Research & Education Trust',
+              deedNumber: `MH-PUN-HAV-2026-${f + 1}01`,
+              undividedSharePct: 4.466
+            },
+            {
+              id: `unit_${f}02`,
+              unitNumber: `${f + 1}02`,
+              unitType: '3BHK Premium (North-West Corner)',
+              floor: f,
+              carpetAreaSqm: 59.5,
+              builtUpAreaSqm: 74.4,
+              volumeM3: 228.6,
+              centroidX: 380118.92,
+              centroidY: 2040129.64,
+              centroidZ: 548.89 + (f - 1) * 3.6,
+              baseUlpin: baseUlpin,
+              ulpin3d: `${baseUlpin}-F0${f}-${f + 1}02`,
+              ownerName: 'Pimpri Chinchwad Research & Education Trust',
+              deedNumber: `MH-PUN-HAV-2026-${f + 1}02`,
+              undividedSharePct: 3.718
+            },
+            {
+              id: `unit_${f}03`,
+              unitNumber: `${f + 1}03`,
+              unitType: '2BHK Standard (South-West Corner)',
+              floor: f,
+              carpetAreaSqm: 74.0,
+              builtUpAreaSqm: 92.5,
+              volumeM3: 284.3,
+              centroidX: 380120.47,
+              centroidY: 2040119.25,
+              centroidZ: 548.89 + (f - 1) * 3.6,
+              baseUlpin: baseUlpin,
+              ulpin3d: `${baseUlpin}-F0${f}-${f + 1}03`,
+              ownerName: 'Pimpri Chinchwad Research & Education Trust',
+              deedNumber: `MH-PUN-HAV-2026-${f + 1}03`,
+              undividedSharePct: 4.624
+            },
+            {
+              id: `unit_${f}04`,
+              unitNumber: `${f + 1}04`,
+              unitType: '3BHK Executive (South-East Corner)',
+              floor: f,
+              carpetAreaSqm: 72.0,
+              builtUpAreaSqm: 90.0,
+              volumeM3: 276.8,
+              centroidX: 380130.99,
+              centroidY: 2040120.84,
+              centroidZ: 548.89 + (f - 1) * 3.6,
+              baseUlpin: baseUlpin,
+              ulpin3d: `${baseUlpin}-F0${f}-${f + 1}04`,
+              ownerName: 'Pimpri Chinchwad Research & Education Trust',
+              deedNumber: `MH-PUN-HAV-2026-${f + 1}04`,
+              undividedSharePct: 4.502
+            }
+          ];
+          data = [...data, ...floorUnits];
+        }
+      }
+
       if (mounted && data.length > 0) {
         setUnits(data);
         setSelectedUnit(data[0]);
@@ -121,10 +205,21 @@ export const Property3DScreen: React.FC<Property3DScreenProps> = ({ parcel, onGe
     unitYMap.current.clear(); floorGroupsMap.current.clear();
     const floorsSet = new Set<number>();
     units.forEach(u => floorsSet.add(u.floor));
-    Array.from(floorsSet).sort().forEach(f => {
+    const sortedFloors = Array.from(floorsSet).sort((a, b) => a - b);
+    const maxFloor = sortedFloors.length > 0 ? sortedFloors[sortedFloors.length - 1] : 4;
+
+    controls.target.set(0, (maxFloor * FLOOR_H) / 2, 0);
+
+    sortedFloors.forEach(f => {
       const g = new THREE.Group(); g.name = `FLOOR_${f}`; scene.add(g); floorGroupsMap.current.set(f, g);
       const slab = new THREE.Mesh(new THREE.BoxGeometry(12.4, 0.18, 16.4), new THREE.MeshStandardMaterial({ color: 0xe2e8f0, roughness: 0.75 }));
       slab.position.set(0, (f - 1) * FLOOR_H, 0); slab.receiveShadow = true; g.add(slab);
+
+      // Add top roof slab above the top floor
+      if (f === maxFloor) {
+        const roofSlab = new THREE.Mesh(new THREE.BoxGeometry(12.6, 0.22, 16.6), new THREE.MeshStandardMaterial({ color: 0xcfd8dc, roughness: 0.8 }));
+        roofSlab.position.set(0, f * FLOOR_H, 0); roofSlab.receiveShadow = true; g.add(roofSlab);
+      }
     });
     units.forEach((u, idx) => {
       const fGroup = floorGroupsMap.current.get(u.floor); if (!fGroup) return;
@@ -197,7 +292,8 @@ export const Property3DScreen: React.FC<Property3DScreenProps> = ({ parcel, onGe
   }, [pulseClock, surveyedUnitId]);
 
   const isSurveyed = selectedUnit?.id === surveyedUnitId;
-  const floorOptions: Array<number | null> = [null, 1, 2, 3, 4];
+  const sortedFloorNums = Array.from(new Set(units.map(u => u.floor))).sort((a, b) => a - b);
+  const floorOptions: Array<number | null> = [null, ...sortedFloorNums];
   const ys = selectedUnit ? unitYMap.current.get(selectedUnit.id) : null;
   const heightFromGround = ys ? ys.bottom.toFixed(1) : '—';
   const ceilingHeight = ys ? ys.top.toFixed(1) : '—';

@@ -42,6 +42,8 @@ app.include_router(real_router)
 # In-memory mock / database bridge
 active_connections: List[WebSocket] = []
 
+@app.get("/")
+@app.get("/ping")
 @app.get("/health")
 def health_check():
     """Endpoint queried by Tauri Rust supervisor on startup and heartbeat."""

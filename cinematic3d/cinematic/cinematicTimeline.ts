@@ -186,6 +186,10 @@ export const transport = {
 
     camera() {
         update({ camera: state.camera === "cinematic" ? "free" : "cinematic" });
+    },
+
+    setCamera(mode: "cinematic" | "free") {
+        update({ camera: mode });
     }
 };
 

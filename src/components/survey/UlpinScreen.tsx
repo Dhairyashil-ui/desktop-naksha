@@ -4,7 +4,8 @@ import {
   ArrowRight, 
   Loader2, 
   Copy,
-  Layers
+  Layers,
+  Download
 } from 'lucide-react';
 import { 
   AssignedParcel, 
@@ -14,6 +15,10 @@ import {
   fetchRealUnits,
   sendToBhuNaksha 
 } from '../../services/surveyApi';
+import { 
+  downloadBhuNakshaSanadPdf, 
+  ensureCompleteStrataUnits 
+} from '../../utils/cadastralPdfGenerator';
 
 interface UlpinScreenProps {
   parcel: AssignedParcel;
@@ -34,21 +39,29 @@ export const UlpinScreen: React.FC<UlpinScreenProps> = ({
   const [units, setUnits] = useState<StrataUnitData[]>([]);
   const [selectedUnitId, setSelectedUnitId] = useState<string | null>(initialUnit?.id || null);
 
+  const [downloadedCert, setDownloadedCert] = useState(false);
+
   const executeTransmission = async () => {
     setIsSending(true);
     setResult(null);
 
-    // Load registered units for this parcel
+    // Load registered units for this parcel and ensure all floors are covered
     const unitList = await fetchRealUnits(parcel);
-    setUnits(unitList);
-    if (!selectedUnitId && unitList.length > 0) {
-      setSelectedUnitId(unitList[0].id);
+    const fullUnits = ensureCompleteStrataUnits(parcel, unitList);
+    setUnits(fullUnits);
+    if (!selectedUnitId && fullUnits.length > 0) {
+      setSelectedUnitId(fullUnits[0].id);
     }
 
     // Real HTTP call to Bhu-Naksha / 3D identity generation endpoint
     const res = await sendToBhuNaksha(report, parcel);
     setResult(res);
     setIsSending(false);
+  };
+
+  const handleDownloadCertificatePdf = () => {
+    downloadBhuNakshaSanadPdf(parcel, report, units, baseUlpin, result?.transactionId);
+    setDownloadedCert(true);
   };
 
   useEffect(() => {
@@ -191,8 +204,24 @@ export const UlpinScreen: React.FC<UlpinScreenProps> = ({
               </div>
             )}
 
-            {/* Action CTA: CREATE PROPERTY CARD */}
-            <div className="pt-2 max-w-sm mx-auto">
+            {/* Action CTA: DOWNLOAD OFFICIAL BHU-NAKSHA SANAD PDF & CREATE PROPERTY CARD */}
+            <div className="pt-2 max-w-md mx-auto space-y-2.5">
+              <button
+                onClick={handleDownloadCertificatePdf}
+                className="w-full py-3 px-6 rounded-xl border-2 border-blue-600 bg-blue-50/70 hover:bg-blue-100 text-blue-800 text-xs font-bold tracking-wider uppercase transition-all shadow-xs flex items-center justify-center space-x-2 cursor-pointer"
+              >
+                {downloadedCert ? (
+                  <Check className="w-4 h-4 text-emerald-600" />
+                ) : (
+                  <Download className="w-4 h-4 text-blue-600" />
+                )}
+                <span>
+                  {downloadedCert
+                    ? 'BHU-NAKSHA 3D CERTIFICATE SAVED'
+                    : '[ DOWNLOAD BHU-NAKSHA 3D SANAD (PDF) ]'}
+                </span>
+              </button>
+
               <button
                 onClick={() => onCreatePropertyCard({ 
                   baseUlpin, 

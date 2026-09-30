@@ -49,9 +49,9 @@ export default function MeasurementOverlays({ options }: MeasurementOverlaysProp
         id = ids[Math.min(ids.length - 1, Math.floor(stage.progress * ids.length))];
     }
 
-    if (stage.id === "inspect") {
+    if (stage.id === "inspect" || options.measurements || options.selected) {
         id = options.selected;
-        visible = options.measurements;
+        visible = options.measurements !== false && Boolean(options.selected);
     }
 
     const object = measureObject(id);

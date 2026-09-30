@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
-import { parts, BuildingPartItem, CameraImageRecord } from "../data/surveyData";
+import { parts, generateBuildingParts, BuildingPartItem, CameraImageRecord } from "../data/surveyData";
 import { stageAt, transport, phaseIndex } from "../cinematic/cinematicTimeline";
 
 const clamp = THREE.MathUtils.clamp;
@@ -18,10 +18,12 @@ export interface BuildingOptions {
     classFilter: number;
 }
 
-interface BuildingProps {
+export interface BuildingProps {
     images: (CameraImageRecord & { texture: THREE.Texture })[];
     options: BuildingOptions;
     onSelect: (instanceId: number) => void;
+    totalFloors?: number;
+    floorHeight?: number;
 }
 
 interface BuildingPartProps {
@@ -159,7 +161,7 @@ function BuildingPart({ object, index, images, options, onSelect }: BuildingPart
         material.depthWrite = opacity > 0.5;
 
         material.emissive.set(
-            interactive && object.instanceId === options.selected
+            object.instanceId === options.selected
                 ? "#0284c7"
                 : "#000000"
         );
@@ -183,9 +185,15 @@ function BuildingPart({ object, index, images, options, onSelect }: BuildingPart
                 castShadow
                 receiveShadow
                 onClick={(event) => {
-                    if (stageAt(transport.read().time).id !== "inspect") return;
                     event.stopPropagation();
                     onSelect(object.instanceId);
+                }}
+                onPointerOver={(event) => {
+                    event.stopPropagation();
+                    document.body.style.cursor = 'pointer';
+                }}
+                onPointerOut={() => {
+                    document.body.style.cursor = 'auto';
                 }}
             />
 
@@ -204,8 +212,13 @@ function BuildingPart({ object, index, images, options, onSelect }: BuildingPart
 
 export default function BuildingModel(props: BuildingProps) {
     const buildingParts = useMemo(
-        () => parts.filter((object) => object.class !== "GROUND"),
-        []
+        () => {
+            const list = props.totalFloors
+                ? generateBuildingParts(props.totalFloors, props.floorHeight ?? 3.2)
+                : parts;
+            return list.filter((object) => object.class !== "GROUND");
+        },
+        [props.totalFloors, props.floorHeight]
     );
 
     return (

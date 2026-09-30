@@ -1,7 +1,8 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import * as THREE from 'three';
-import { Check, ArrowRight, Eye } from 'lucide-react';
+import { Check, ArrowRight, Eye, Globe, Sparkles } from 'lucide-react';
 import { AssignedParcel } from '../../services/surveyApi';
+import { Ppcrc3DView } from '../ppcrc-3d-view';
 
 interface CompleteScreenProps {
   parcel: AssignedParcel;
@@ -19,6 +20,7 @@ export const CompleteScreen: React.FC<CompleteScreenProps> = ({
   onDone
 }) => {
   const mountRef = useRef<HTMLDivElement>(null);
+  const [showIndiaVision, setShowIndiaVision] = useState(false);
 
   // Subtle 3D Apartment / Building wireframe background
   useEffect(() => {
@@ -148,19 +150,30 @@ export const CompleteScreen: React.FC<CompleteScreenProps> = ({
           </div>
         </div>
 
-        {/* Buttons: [ VIEW PROPERTY CARD ] and [ DONE ] */}
-        <div className="space-y-3 pt-2">
+        {/* Buttons: [ VIEW PROPERTY CARD ], [ PAN-INDIA VISION ], and [ DONE ] */}
+        <div className="space-y-2.5 pt-2">
           <button
             onClick={onViewPropertyCard}
-            className="w-full py-3 px-5 rounded-xl border border-zinc-300 hover:border-zinc-900 text-zinc-800 text-xs font-bold tracking-wider uppercase transition-colors flex items-center justify-center space-x-2"
+            className="w-full py-3 px-5 rounded-xl border border-zinc-300 hover:border-zinc-900 text-zinc-800 text-xs font-bold tracking-wider uppercase transition-colors flex items-center justify-center space-x-2 cursor-pointer"
           >
             <Eye className="w-3.5 h-3.5" />
             <span>[ VIEW PROPERTY CARD ]</span>
           </button>
 
+          {/* Pan-India 3D Digital Twin Vision CTA */}
+          <button
+            id="btn-pan-india-vision-complete"
+            onClick={() => setShowIndiaVision(true)}
+            className="w-full py-3 px-5 rounded-xl bg-gradient-to-r from-blue-700 via-indigo-700 to-violet-800 hover:from-blue-800 hover:to-violet-900 text-white font-mono text-xs font-bold tracking-wider uppercase transition-all shadow-md hover:shadow-lg flex items-center justify-center space-x-2 active:scale-98 cursor-pointer ring-2 ring-indigo-500/20"
+          >
+            <Globe className="w-4 h-4 text-cyan-300" />
+            <span>[ PAN-INDIA 3D PARCEL CADASTRE VISION ]</span>
+            <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+          </button>
+
           <button
             onClick={onDone}
-            className="w-full py-3.5 px-6 rounded-xl bg-zinc-900 hover:bg-black text-white text-xs font-bold tracking-widest uppercase transition-all shadow-md flex items-center justify-center space-x-2 active:scale-98"
+            className="w-full py-3.5 px-6 rounded-xl bg-zinc-900 hover:bg-black text-white text-xs font-bold tracking-widest uppercase transition-all shadow-md flex items-center justify-center space-x-2 active:scale-98 cursor-pointer"
           >
             <span>[ DONE ]</span>
             <ArrowRight className="w-3.5 h-3.5" />
@@ -172,6 +185,44 @@ export const CompleteScreen: React.FC<CompleteScreenProps> = ({
       <div className="relative z-10 w-full text-center text-[11px] font-mono text-zinc-400 p-4">
         Ready for Next Survey Task • ISO 19152 Cadastral Authority Registered
       </div>
+
+      {/* Full-Screen Pan-India 3D Digital Twin Viewer Modal */}
+      {showIndiaVision && (
+        <div className="fixed inset-0 z-50 bg-black flex flex-col animate-in fade-in duration-300">
+          {/* Top Bar */}
+          <div className="w-full bg-zinc-950 border-b border-zinc-800 px-6 py-2.5 flex items-center justify-between z-20">
+            <div className="flex items-center space-x-3">
+              <div className="flex items-center space-x-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="text-white font-mono font-bold text-xs tracking-wider uppercase">
+                  National Cadastre 3D Digital Twin Framework
+                </span>
+              </div>
+              <span className="text-zinc-600 hidden sm:inline">|</span>
+              <span className="text-zinc-400 font-mono text-[11px] hidden sm:inline">
+                Standard for Every Land Parcel & Strata High-Rise in India
+              </span>
+            </div>
+            <button
+              onClick={() => setShowIndiaVision(false)}
+              className="px-3.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-white font-mono text-xs font-bold transition-colors cursor-pointer flex items-center space-x-1.5"
+            >
+              <span>✕ CLOSE 3D VISION</span>
+            </button>
+          </div>
+
+          {/* Master 3D Experience (India Map -> Aerial -> 3D Twin -> Door Arrival -> HUD) */}
+          <div className="flex-1 w-full h-full relative overflow-hidden bg-black">
+            <Ppcrc3DView
+              initialState="initial_map"
+              initialRoom="A-101"
+              initialUlpin={baseUlpin}
+              modelUrl="/h.glb"
+              aerialImageUrl="/pccrc_building_centered_aerial.jpg"
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 };

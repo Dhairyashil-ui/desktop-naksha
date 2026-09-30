@@ -6,7 +6,8 @@ import {
   Database,
   Cpu,
   Layers,
-  ShieldCheck
+  ShieldCheck,
+  Ruler
 } from 'lucide-react';
 import { AssignedParcel, dispatchRealPipeline } from '../../services/surveyApi';
 import { 
@@ -16,6 +17,7 @@ import {
   getParcelBuildingMetrics 
 } from './construction/cadastralPipelineElements';
 import { CinematicMiniScreen } from './construction/CinematicMiniScreen';
+import { measureObject } from '../../../cinematic3d/processing/surveyProcessor';
 
 interface ConstructionScreenProps {
   parcel: AssignedParcel;
@@ -29,6 +31,9 @@ export const ConstructionScreen: React.FC<ConstructionScreenProps> = ({
   const [activeStage, setActiveStage] = useState<PipelineStage>('PHOTOGRAMMETRY');
   const [stageProgress, setStageProgress] = useState<number>(0);
   const [isCompleted, setIsCompleted] = useState<boolean>(false);
+  const [selectedPartId, setSelectedPartId] = useState<number>(401);
+  const [showMeasurements, setShowMeasurements] = useState<boolean>(true);
+  const [activeBottomTab, setActiveBottomTab] = useState<'measure' | 'legend'>('measure');
 
   const activeStageRef = useRef<PipelineStage>('PHOTOGRAMMETRY');
   const stageProgressRef = useRef<number>(0);
@@ -150,6 +155,77 @@ export const ConstructionScreen: React.FC<ConstructionScreenProps> = ({
 
   const currentMetrics = getStageMetrics();
 
+  // Measure active building component
+  const getPartDetails = (partId: number) => {
+    const m = measureObject(partId, metrics.totalFloors, metrics.floorHeight);
+    if (!m) return null;
+
+    let title = `Building Component #${partId}`;
+    let category = m.class;
+    let materialSpec = 'M25 Reinforced Concrete / Structural Masonry';
+
+    if (partId >= 400 && partId <= 400 + metrics.totalFloors) {
+      const floorNum = partId - 400;
+      category = floorNum === metrics.totalFloors ? 'ROOFTOP SLAB' : 'STRUCTURAL SLAB';
+      title = floorNum === 0 
+        ? 'Ground Foundation Slab' 
+        : floorNum === metrics.totalFloors 
+        ? `Rooftop Terrace Slab (Level ${floorNum})` 
+        : `Storey ${floorNum} Intermediate Floor Slab`;
+      materialSpec = 'M25 Post-Tensioned Concrete • 240mm Depth';
+    } else if (partId === 127 || partId === 128) {
+      category = 'ENTRANCE DOOR';
+      title = partId === 127 ? 'Main Entry Left Double Door' : 'Main Entry Right Double Door';
+      materialSpec = 'IS 3614 Standard Galvanized Fire-Rated Door';
+    } else if (partId === 350) {
+      category = 'CANOPY PORTICO';
+      title = 'Entrance Cantilevered Porch Canopy';
+      materialSpec = 'IS 800 Structural Steel Box Section & Toughened Glass';
+    } else if (partId >= 201 && partId <= 280) {
+      category = 'FACADE OPENING';
+      title = `Casement Window Unit #${partId}`;
+      materialSpec = 'Double-Glazed Low-E Acoustic Glass & Powder Aluminum';
+    } else if (partId >= 301 && partId <= 350) {
+      category = 'HVAC EQUIPMENT';
+      title = `VRF Compressor Unit #${partId}`;
+      materialSpec = 'Variable Refrigerant Heat Pump (R410A)';
+    } else if (m.class === 'WALL') {
+      category = 'EXTERNAL WALL';
+      title = `Storey Exterior Façade Wall Element`;
+      materialSpec = 'Autoclaved Aerated Concrete (AAC) Lightweight Block';
+    } else if (m.class === 'STRUCTURE') {
+      category = 'CORE STRUCTURE';
+      title = 'Elevator Machine Room / Overhead Tank';
+      materialSpec = 'Monolithic Shear Wall & Cast-in-situ RCC';
+    }
+
+    const vol = m.size.x * m.size.y * m.size.z;
+
+    return {
+      ...m,
+      title,
+      category,
+      materialSpec,
+      volumeM3: vol
+    };
+  };
+
+  const activePartInfo = getPartDetails(selectedPartId);
+
+  // Key parts list for quick component selection
+  const keyParts = [
+    { id: 400, name: 'Ground Slab', category: 'SLAB' },
+    { id: 401, name: 'Floor 1 Slab', category: 'SLAB' },
+    { id: 402, name: 'Floor 2 Slab', category: 'SLAB' },
+    { id: 403, name: 'Floor 3 Slab', category: 'SLAB' },
+    { id: 400 + metrics.totalFloors, name: 'Roof Slab', category: 'SLAB' },
+    { id: 127, name: 'Entry Door', category: 'DOOR' },
+    { id: 350, name: 'Porch Canopy', category: 'CANOPY' },
+    { id: 501, name: 'Façade Wall', category: 'WALL' },
+    { id: 201, name: 'Window F01', category: 'WINDOW' },
+    { id: 301, name: 'Rooftop Chiller', category: 'AC' },
+  ];
+
   return (
     <div className="h-[calc(100vh-3.5rem)] w-full bg-white text-slate-800 flex flex-col justify-between font-sans select-none overflow-hidden relative">
       {/* Fixed Full-Bleed 3D Showcase Canvas Background */}
@@ -161,6 +237,9 @@ export const ConstructionScreen: React.FC<ConstructionScreenProps> = ({
           metrics={metrics}
           surveyNumber={`${parcel.surveyNumber}/${parcel.subDivision}`}
           location={parcel.location}
+          selectedPartId={selectedPartId}
+          onPartSelected={setSelectedPartId}
+          showMeasurements={showMeasurements}
         />
       </div>
 
@@ -271,44 +350,157 @@ export const ConstructionScreen: React.FC<ConstructionScreenProps> = ({
         </div>
       </div>
 
-      {/* Architectural Cadastral Room Segmentation Legend */}
+      {/* Architectural Cadastral Room Segmentation & Component Measurements Panel */}
       {(['SEGMENTATION', 'TOPOLOGY'].includes(activeStage) || isCompleted) && (
         <div className="absolute left-6 bottom-5 z-20 font-mono text-[10px] pointer-events-auto animate-in fade-in duration-300">
-          <div className="bg-white/95 backdrop-blur-md border border-slate-200/90 rounded-xl p-3 shadow-lg space-y-2 max-w-xs text-slate-700">
-            <div className="flex items-center justify-between pb-1 border-b border-slate-200 font-bold text-slate-800">
-              <span>SEGMENTED APARTMENTS ({metrics.totalFlats})</span>
-              <span className="text-amber-600 font-bold">H: {metrics.totalHeight.toFixed(1)}m</span>
+          <div className="bg-white/95 backdrop-blur-md border border-slate-200/90 rounded-2xl p-3.5 shadow-xl space-y-2.5 max-w-sm text-slate-700">
+            {/* Tab switch: Measurements vs Apartments */}
+            <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+              <div className="flex items-center space-x-1.5 bg-slate-100 p-0.5 rounded-lg text-[10px]">
+                <button
+                  onClick={() => setActiveBottomTab('measure')}
+                  className={`px-2.5 py-1 rounded-md font-bold transition-all flex items-center space-x-1 cursor-pointer ${
+                    activeBottomTab === 'measure'
+                      ? 'bg-white text-cyan-800 shadow-xs'
+                      : 'text-slate-500 hover:text-slate-900'
+                  }`}
+                >
+                  <Ruler className="w-3 h-3" />
+                  <span>MEASUREMENTS</span>
+                </button>
+                <button
+                  onClick={() => setActiveBottomTab('legend')}
+                  className={`px-2.5 py-1 rounded-md font-bold transition-all cursor-pointer ${
+                    activeBottomTab === 'legend'
+                      ? 'bg-white text-slate-900 shadow-xs'
+                      : 'text-slate-500 hover:text-slate-900'
+                  }`}
+                >
+                  <span>APARTMENTS ({metrics.totalFlats})</span>
+                </button>
+              </div>
+
+              {activeBottomTab === 'measure' && (
+                <button
+                  onClick={() => setShowMeasurements(prev => !prev)}
+                  className="text-[9px] font-bold text-cyan-700 hover:text-cyan-900 bg-cyan-50 px-2 py-0.5 rounded border border-cyan-200 cursor-pointer"
+                >
+                  {showMeasurements ? '3D LINES ON' : '3D LINES OFF'}
+                </button>
+              )}
             </div>
-            <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-slate-600">
-              <div className="flex items-center space-x-1.5">
-                <span className="w-2.5 h-2.5 rounded-sm bg-sky-400 border border-sky-500" />
-                <span>Living & Dining</span>
+
+            {activeBottomTab === 'measure' ? (
+              /* Component Cadastral Measurement Details */
+              <div className="space-y-2">
+                {activePartInfo ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="font-bold text-slate-900 text-xs">{activePartInfo.title}</div>
+                        <div className="text-[9px] text-slate-400">ID #{selectedPartId} • {activePartInfo.materialSpec}</div>
+                      </div>
+                      <span className="text-[9px] bg-cyan-100 text-cyan-800 font-bold px-1.5 py-0.5 rounded">
+                        {activePartInfo.category}
+                      </span>
+                    </div>
+
+                    {/* Dimensions & Spatial Metric Grid */}
+                    <div className="grid grid-cols-2 gap-1.5 text-[10px] bg-slate-50 p-2 rounded-xl border border-slate-200/80">
+                      <div>
+                        <span className="text-slate-400 text-[9px] block uppercase">Dimensions (W×H×D)</span>
+                        <span className="font-bold text-slate-900">
+                          {activePartInfo.size.x.toFixed(2)}m × {activePartInfo.size.y.toFixed(2)}m × {activePartInfo.size.z.toFixed(2)}m
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 text-[9px] block uppercase">Face Area</span>
+                        <span className="font-bold text-emerald-700">{activePartInfo.area.toFixed(2)} m²</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 text-[9px] block uppercase">Solid Volume</span>
+                        <span className="font-bold text-cyan-700">{activePartInfo.volumeM3.toFixed(2)} m³</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 text-[9px] block uppercase">Datum Elevation (Y)</span>
+                        <span className="font-bold text-amber-700">+{activePartInfo.elevation.toFixed(2)}m Ground</span>
+                      </div>
+                      <div className="col-span-2 pt-1 border-t border-slate-200/60">
+                        <span className="text-slate-400 text-[9px] block uppercase">Spatial Centroid (XYZ)</span>
+                        <span className="font-medium text-slate-700 text-[9px]">
+                          X: {activePartInfo.center.x.toFixed(2)}m, Y: {activePartInfo.center.y.toFixed(2)}m, Z: {activePartInfo.center.z.toFixed(2)}m
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="py-3 text-center text-slate-400">
+                    Click any component in the 3D building to inspect
+                  </div>
+                )}
+
+                {/* Quick Component Selector Buttons */}
+                <div className="space-y-1">
+                  <div className="text-[9px] uppercase font-bold text-slate-400 flex items-center justify-between">
+                    <span>Inspect Components:</span>
+                    <span className="text-cyan-600 font-normal">Click 3D Model or buttons</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1 max-h-16 overflow-y-auto">
+                    {keyParts.map(p => (
+                      <button
+                        key={p.id}
+                        onClick={() => setSelectedPartId(p.id)}
+                        className={`px-1.5 py-0.5 rounded text-[9px] font-mono transition-colors cursor-pointer ${
+                          selectedPartId === p.id 
+                            ? 'bg-slate-900 text-white font-bold' 
+                            : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                        }`}
+                      >
+                        {p.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
-              <div className="flex items-center space-x-1.5">
-                <span className="w-2.5 h-2.5 rounded-sm bg-indigo-500 border border-indigo-600" />
-                <span>Master Bed</span>
+            ) : (
+              /* Apartment Legend */
+              <div className="space-y-2">
+                <div className="flex items-center justify-between font-bold text-slate-800">
+                  <span>ROOM CLASSIFICATION</span>
+                  <span className="text-amber-600 font-bold">H: {metrics.totalHeight.toFixed(1)}m</span>
+                </div>
+                <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-slate-600">
+                  <div className="flex items-center space-x-1.5">
+                    <span className="w-2.5 h-2.5 rounded-sm bg-sky-400 border border-sky-500" />
+                    <span>Living & Dining</span>
+                  </div>
+                  <div className="flex items-center space-x-1.5">
+                    <span className="w-2.5 h-2.5 rounded-sm bg-indigo-500 border border-indigo-600" />
+                    <span>Master Bed</span>
+                  </div>
+                  <div className="flex items-center space-x-1.5">
+                    <span className="w-2.5 h-2.5 rounded-sm bg-amber-400 border border-amber-500" />
+                    <span>Modular Kitchen</span>
+                  </div>
+                  <div className="flex items-center space-x-1.5">
+                    <span className="w-2.5 h-2.5 rounded-sm bg-rose-400 border border-rose-500" />
+                    <span>Attached Bath</span>
+                  </div>
+                  <div className="flex items-center space-x-1.5">
+                    <span className="w-2.5 h-2.5 rounded-sm bg-emerald-400 border border-emerald-500" />
+                    <span>Bed 2 / Utility</span>
+                  </div>
+                  <div className="flex items-center space-x-1.5">
+                    <span className="w-2.5 h-2.5 rounded-sm border-2 border-dashed border-sky-400" />
+                    <span>Swing Doors ({metrics.totalRooms}+)</span>
+                  </div>
+                </div>
+                <div className="pt-1 border-t border-slate-200 text-[9px] text-slate-400 flex items-center justify-between">
+                  <span>{metrics.totalFloors} Storeys @ {metrics.floorHeight}m/FL</span>
+                  <span className="text-amber-600 font-semibold">Datum Y=0.00m Ground</span>
+                </div>
               </div>
-              <div className="flex items-center space-x-1.5">
-                <span className="w-2.5 h-2.5 rounded-sm bg-amber-400 border border-amber-500" />
-                <span>Modular Kitchen</span>
-              </div>
-              <div className="flex items-center space-x-1.5">
-                <span className="w-2.5 h-2.5 rounded-sm bg-rose-400 border border-rose-500" />
-                <span>Attached Bath</span>
-              </div>
-              <div className="flex items-center space-x-1.5">
-                <span className="w-2.5 h-2.5 rounded-sm bg-emerald-400 border border-emerald-500" />
-                <span>Bed 2 / Utility</span>
-              </div>
-              <div className="flex items-center space-x-1.5">
-                <span className="w-2.5 h-2.5 rounded-sm border-2 border-dashed border-sky-400" />
-                <span>Swing Doors ({metrics.totalRooms}+)</span>
-              </div>
-            </div>
-            <div className="pt-1 border-t border-slate-200 text-[9px] text-slate-400 flex items-center justify-between">
-              <span>{metrics.totalFloors} Storeys @ {metrics.floorHeight}m/FL</span>
-              <span className="text-amber-600 font-semibold">Datum Y=0.00m Ground</span>
-            </div>
+            )}
           </div>
         </div>
       )}

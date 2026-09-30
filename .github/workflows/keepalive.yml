@@ -1,0 +1,15 @@
+name: Render Free Dyno Keepalive
+
+on:
+  schedule:
+    # Trigger every 14 minutes (Render sleeps at 15 minutes of inactivity)
+    - cron: '*/14 * * * *'
+  workflow_dispatch:
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Render Backend Health Endpoint
+        run: |
+          curl -s -f -o /dev/null -w "HTTP %{http_code} in %{time_total}s\n" https://desktop-naksha.onrender.com/health || true

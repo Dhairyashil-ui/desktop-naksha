@@ -17,6 +17,9 @@ interface CinematicMiniScreenProps {
   surveyNumber: string;
   location: string;
   metrics?: ParcelBuildingMetrics;
+  selectedPartId?: number;
+  onPartSelected?: (partId: number) => void;
+  showMeasurements?: boolean;
 }
 
 export const CinematicMiniScreen: React.FC<CinematicMiniScreenProps> = ({
@@ -24,7 +27,11 @@ export const CinematicMiniScreen: React.FC<CinematicMiniScreenProps> = ({
   stageProgress,
   isCompleted,
   surveyNumber: _surveyNumber,
-  location: _location
+  location: _location,
+  metrics,
+  selectedPartId,
+  onPartSelected,
+  showMeasurements = true
 }) => {
   useTimeline();
 
@@ -52,17 +59,19 @@ export const CinematicMiniScreen: React.FC<CinematicMiniScreenProps> = ({
   useEffect(() => {
     if (isCompleted) {
       transport.seek(END);
-      setOptions({
-        selected: 127,
+      transport.setCamera('free');
+      setOptions(prev => ({
+        ...prev,
+        selected: selectedPartId ?? prev.selected ?? 501,
         view: 'model',
         showMesh: true,
         showCloud: false,
         semantic: false,
-        measurements: false,
+        measurements: showMeasurements,
         coordinates: false,
         isolate: false,
         classFilter: -1
-      });
+      }));
       return;
     }
 
@@ -98,14 +107,29 @@ export const CinematicMiniScreen: React.FC<CinematicMiniScreenProps> = ({
     } else if (activeStage === 'TOPOLOGY') {
       setOptions(prev => ({ ...prev, view: 'model', showMesh: true, showCloud: false, semantic: false }));
     }
-  }, [activeStage, stageProgress, isCompleted]);
+  }, [activeStage, stageProgress, isCompleted, selectedPartId, showMeasurements]);
+
+  useEffect(() => {
+    if (selectedPartId !== undefined) {
+      setOptions(prev => ({
+        ...prev,
+        selected: selectedPartId,
+        measurements: showMeasurements
+      }));
+    }
+  }, [selectedPartId, showMeasurements]);
 
   return (
     <div className="w-full h-full relative overflow-hidden bg-white select-none">
       <SurveySceneView
         options={options}
+        totalFloors={metrics?.totalFloors ?? 4}
+        floorHeight={metrics?.floorHeight ?? 3.2}
         onSelect={selected => {
           setOptions(prev => ({ ...prev, selected }));
+          if (onPartSelected) {
+            onPartSelected(selected);
+          }
         }}
       />
     </div>

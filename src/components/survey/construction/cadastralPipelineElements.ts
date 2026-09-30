@@ -39,7 +39,7 @@ export function getParcelBuildingMetrics(parcel: AssignedParcel): ParcelBuilding
   const numVal = parseInt(parcel.surveyNumber?.replace(/\D/g, '') || '204', 10);
   const area = parcel.legalAreaSqm || parcel.gisAreaSqm || 1248.5;
   const floorHeight = 3.2; // 3.2m per storey
-  const totalFloors = area > 1400 ? 4 : 3 + (numVal % 2); // 3 or 4 storeys
+  const totalFloors = parcel.floorsCount || (area > 1400 ? 4 : 3 + (numVal % 2)); // 3 or 4 storeys (or explicit parcel.floorsCount)
   const totalHeight = totalFloors * floorHeight;
   const spreadX = 22 + (numVal % 5) * 1.6;
   const spreadZ = 16 + (numVal % 4) * 1.4;

@@ -20,9 +20,11 @@ import MeasurementOverlays from "./MeasurementOverlays";
 interface WorldProps {
     options: BuildingOptions;
     onSelect: (instanceId: number) => void;
+    totalFloors?: number;
+    floorHeight?: number;
 }
 
-function World({ options, onSelect }: WorldProps) {
+function World({ options, onSelect, totalFloors, floorHeight }: WorldProps) {
     const { camera: cameraMode } = useTimeline();
 
     return (
@@ -66,7 +68,7 @@ function World({ options, onSelect }: WorldProps) {
 
             {/* Clean building and reconstruction layers, scaled prominently without drone/camera clutter */}
             <group scale={[0.92, 0.92, 0.92]} position={[0, 0, 0]}>
-                <BuildingModel images={[]} options={options} onSelect={onSelect} />
+                <BuildingModel images={[]} options={options} onSelect={onSelect} totalFloors={totalFloors} floorHeight={floorHeight} />
                 <PointCloudLayer source="lidar" options={options} onSelect={onSelect} />
                 <PointCloudLayer source="photo" options={options} onSelect={onSelect} />
                 <SurveyEffectsLayer />
@@ -105,6 +107,8 @@ function World({ options, onSelect }: WorldProps) {
 interface SurveySceneViewProps {
     options: BuildingOptions;
     onSelect: (instanceId: number) => void;
+    totalFloors?: number;
+    floorHeight?: number;
 }
 
 export default function SurveySceneView(props: SurveySceneViewProps) {

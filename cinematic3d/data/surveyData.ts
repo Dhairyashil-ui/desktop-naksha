@@ -47,108 +47,121 @@ export interface BuildingPartItem {
     provenance: string;
 }
 
-export const parts: BuildingPartItem[] = [];
+export function generateBuildingParts(
+    totalFloors: number = 4,
+    floorHeight: number = 3.2
+): BuildingPartItem[] {
+    const list: BuildingPartItem[] = [];
+    let curId = 500;
 
-let nextId = 500;
-
-function part(
-    semanticClass: string,
-    position: [number, number, number],
-    size: [number, number, number],
-    color: string,
-    instanceId = nextId++,
-    parentId = "BUILDING-001"
-): BuildingPartItem {
-    const item: BuildingPartItem = {
-        class: semanticClass,
-        classId: classes.indexOf(semanticClass),
-        instanceId,
-        parentId,
-        position,
-        size,
-        color,
-        confidence: 1,
-        provenance: "procedural-ground-truth"
+    const addPart = (
+        semanticClass: string,
+        position: [number, number, number],
+        size: [number, number, number],
+        color: string,
+        instanceId = curId++,
+        parentId = "BUILDING-001"
+    ): BuildingPartItem => {
+        const item: BuildingPartItem = {
+            class: semanticClass,
+            classId: classes.indexOf(semanticClass),
+            instanceId,
+            parentId,
+            position,
+            size,
+            color,
+            confidence: 1,
+            provenance: "procedural-ground-truth"
+        };
+        list.push(item);
+        return item;
     };
 
-    parts.push(item);
-    return item;
-}
+    // Ground platform / terrain
+    addPart("GROUND", [0, -0.18, 0], [42, 0.3, 32], "#6c7270", 10);
 
-// A plausible campus-scale research building.
-part("GROUND", [0, -0.18, 0], [42, 0.3, 32], "#6c7270", 10);
+    // Concrete slabs for each floor + top roof slab
+    for (let floor = 0; floor <= totalFloors; floor++) {
+        const isRoof = floor === totalFloors;
+        addPart(
+            isRoof ? "ROOF" : "FLOOR",
+            [0, floor * floorHeight, 0],
+            isRoof ? [26.2, 0.28, 15.0] : [25.8, 0.24, 14.6],
+            isRoof ? "#74817f" : "#a6aaa2",
+            400 + floor
+        );
+    }
 
-for (let floor = 0; floor <= 3; floor++) {
-    part(
-        floor === 3 ? "ROOF" : "FLOOR",
-        [0, floor * 3.4, 0],
-        [25.8, 0.24, 14.6],
-        floor === 3 ? "#74817f" : "#a6aaa2",
-        400 + floor
-    );
-}
+    let windowId = 201;
 
-let windowId = 201;
+    // Walls, windows, and AC units for each storey
+    for (let floor = 0; floor < totalFloors; floor++) {
+        const base = floor * floorHeight;
 
-for (let floor = 0; floor < 3; floor++) {
-    const base = floor * 3.4;
+        for (const side of [-1, 1]) {
+            const z = side * 7;
 
-    for (const side of [-1, 1]) {
-        const z = side * 7;
+            // Continuous horizontal bands above and below the openings
+            addPart("WALL", [0, base + 0.45, z], [25.2, 0.9, 0.3], "#b7b5a5");
+            addPart("WALL", [0, base + floorHeight - 0.35, z], [25.2, 0.7, 0.3], "#b7b5a5");
 
-        // Continuous bands above and below the openings.
-        part("WALL", [0, base + 0.5, z], [25.2, 0.95, 0.3], "#b7b5a5");
-        part("WALL", [0, base + 2.95, z], [25.2, 0.85, 0.3], "#b7b5a5");
+            for (let bay = 0; bay < 7; bay++) {
+                const x = -10.8 + bay * 3.6;
 
-        for (let bay = 0; bay < 7; bay++) {
-            const x = -10.8 + bay * 3.6;
+                addPart("WALL", [x - 1.48, base + floorHeight * 0.52, z], [0.62, floorHeight * 0.48, 0.3], "#b7b5a5");
 
-            part("WALL", [x - 1.48, base + 1.72, z], [0.62, 1.55, 0.3], "#b7b5a5");
+                const id = windowId++;
 
-            const id = windowId++;
-
-            part(
-                "WINDOW",
-                [x + 0.2, base + 1.72, z + side * 0.025],
-                [2.55, 1.5, 0.13],
-                "#38545d",
-                id
-            );
-
-            part(
-                "STRUCTURE",
-                [x + 0.2, base + 1.72, z + side * 0.12],
-                [0.055, 1.52, 0.06],
-                "#929d99"
-            );
-
-            if (side === 1 && bay % 3 === 0 && floor > 0) {
-                part(
-                    "AC",
-                    [x + 0.7, base + 0.63, 7.46],
-                    [0.86, 0.52, 0.36],
-                    "#aeb8b4",
-                    301 + floor * 10 + bay
+                addPart(
+                    "WINDOW",
+                    [x + 0.2, base + floorHeight * 0.52, z + side * 0.025],
+                    [2.55, floorHeight * 0.46, 0.13],
+                    "#38545d",
+                    id
                 );
+
+                addPart(
+                    "STRUCTURE",
+                    [x + 0.2, base + floorHeight * 0.52, z + side * 0.12],
+                    [0.055, floorHeight * 0.47, 0.06],
+                    "#929d99"
+                );
+
+                if (side === 1 && bay % 3 === 0 && floor > 0) {
+                    addPart(
+                        "AC",
+                        [x + 0.7, base + 0.63, 7.46],
+                        [0.86, 0.52, 0.36],
+                        "#aeb8b4",
+                        301 + floor * 10 + bay
+                    );
+                }
             }
+        }
+
+        // East & West side walls
+        for (const x of [-12.6, 12.6]) {
+            addPart("WALL", [x, base + floorHeight * 0.5, 0], [0.3, floorHeight - 0.04, 14], "#aaa99c");
         }
     }
 
-    for (const x of [-12.6, 12.6]) {
-        part("WALL", [x, base + 1.7, 0], [0.3, 3.16, 14], "#aaa99c");
-    }
+    // Entrance doors and porch canopy on Ground Floor
+    addPart("DOOR", [-1.1, 1.025, 7.26], [0.92, 2.05, 0.14], "#586c6d", 127);
+    addPart("DOOR", [0.1, 1.025, 7.26], [0.92, 2.05, 0.14], "#586c6d", 128);
+
+    addPart("BALCONY", [0, floorHeight, 8.15], [7.8, 0.22, 2.35], "#a3aaa1", 350);
+    addPart("STRUCTURE", [-3.6, floorHeight * 0.5, 8.7], [0.24, floorHeight, 0.24], "#a7afa6");
+    addPart("STRUCTURE", [3.6, floorHeight * 0.5, 8.7], [0.24, floorHeight, 0.24], "#a7afa6");
+
+    // Rooftop head room / elevator machine room & chiller AC on the roof
+    const roofY = totalFloors * floorHeight;
+    addPart("STRUCTURE", [0, roofY + 0.75, -1.7], [6.4, 1.5, 4.6], "#999f96");
+    addPart("AC", [7.4, roofY + 0.5, -2.4], [2.1, 0.95, 1.5], "#9daaa5", 301);
+
+    return list;
 }
 
-// Distinct entrance objects with measurable dimensions.
-part("DOOR", [-1.1, 1.025, 7.26], [0.92, 2.05, 0.14], "#586c6d", 127);
-part("DOOR", [0.1, 1.025, 7.26], [0.92, 2.05, 0.14], "#586c6d", 128);
-
-part("BALCONY", [0, 3.4, 8.15], [7.8, 0.22, 2.35], "#a3aaa1", 350);
-part("STRUCTURE", [-3.6, 1.65, 8.7], [0.24, 3.3, 0.24], "#a7afa6");
-part("STRUCTURE", [3.6, 1.65, 8.7], [0.24, 3.3, 0.24], "#a7afa6");
-
-part("STRUCTURE", [0, 11, -1.7], [6.4, 1.5, 4.6], "#999f96");
-part("AC", [7.4, 10.82, -2.4], [2.1, 0.95, 1.5], "#9daaa5", 301);
+export const parts: BuildingPartItem[] = generateBuildingParts(4, 3.2);
 
 export function dronePosition(time: number): THREE.Vector3 {
     const arrival = Math.min(1, Math.max(0, (time - 40) / 40));

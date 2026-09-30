@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { parts, classColors, BuildingPartItem } from "../data/surveyData";
+import { parts, classColors, BuildingPartItem, generateBuildingParts } from "../data/surveyData";
 
 function seededRandom(seed = 42) {
     return () => {
@@ -206,8 +206,32 @@ export interface MeasuredObject extends Omit<BoundedObject, "size"> {
     source: string;
 }
 
-export function measureObject(instanceId: number | string): MeasuredObject | null {
-    const object = bounds.get(Number(instanceId));
+export function measureObject(instanceId: number | string, totalFloors = 4, floorHeight = 3.2): MeasuredObject | null {
+    let object = bounds.get(Number(instanceId));
+    if (!object) {
+        const dynParts = generateBuildingParts(totalFloors, floorHeight);
+        const item = dynParts.find(p => p.instanceId === Number(instanceId))
+            || parts.find(p => p.instanceId === Number(instanceId));
+        if (item) {
+            const sizeVec = new THREE.Vector3(...item.size);
+            const centerVec = new THREE.Vector3(...item.position);
+            const min = new THREE.Vector3(
+                centerVec.x - sizeVec.x / 2,
+                centerVec.y - sizeVec.y / 2,
+                centerVec.z - sizeVec.z / 2
+            );
+            const max = new THREE.Vector3(
+                centerVec.x + sizeVec.x / 2,
+                centerVec.y + sizeVec.y / 2,
+                centerVec.z + sizeVec.z / 2
+            );
+            object = {
+                ...item,
+                pointIds: [],
+                boundingBox: new THREE.Box3(min, max)
+            };
+        }
+    }
     if (!object) return null;
 
     const size = object.boundingBox.getSize(new THREE.Vector3());
