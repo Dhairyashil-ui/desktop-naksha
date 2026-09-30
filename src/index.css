@@ -50,6 +50,14 @@
 }
 
 .glass-card:hover {
-  border-color: rgba(37, 99, 235, 0.5);
+  border-color: rgba(37, 99, 255, 0.5);
   transform: translateY(-1px);
+}
+
+/* Suppress Google Maps alpha channel disclaimers */
+.gm-style-cc,
+.gmnoprint,
+.dismissButton,
+div[style*="Using the alpha channel"] {
+  display: none !important;
 }
