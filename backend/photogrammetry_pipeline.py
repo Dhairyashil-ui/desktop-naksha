@@ -28,7 +28,10 @@ from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass, field
 
 import numpy as np
-import cv2
+try:
+    import cv2
+except ImportError:
+    cv2 = None
 import laspy
 
 # Optional PyTorch & Kornia

@@ -19,6 +19,8 @@ trimesh>=4.0.0
 ezdxf>=1.2.0
 pypdf>=4.0.0
 python-docx>=1.1.0
+opencv-python-headless>=4.8.0
+boto3>=1.34.0
 
 # ── Geospatial & Point Cloud Processing Stack ──────────────────────────────
 rasterio>=1.4.0          # GeoTIFF/raster I/O, CRS reprojection, GDAL bindings
