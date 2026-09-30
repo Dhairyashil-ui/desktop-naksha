@@ -4,8 +4,10 @@
  * supporting both local engine (127.0.0.1:8000) and remote Cloud backend (e.g. Render).
  */
 
+export const OFFICIAL_RENDER_BACKEND = 'https://desktop-naksha.onrender.com';
+
 const getInitialBackendUrl = (): string => {
-  // 1. Allow runtime override from localStorage (e.g., user entering Render URL in UI)
+  // 1. Allow runtime override from localStorage (e.g. user toggling to local or another server)
   if (typeof window !== 'undefined') {
     const saved = localStorage.getItem('naksha_backend_url');
     if (saved && saved.trim()) {
@@ -19,8 +21,8 @@ const getInitialBackendUrl = (): string => {
   if (import.meta.env.VITE_API_URL) {
     return (import.meta.env.VITE_API_URL as string).replace(/\/+$/, '');
   }
-  // 3. Fallback to local desktop backend
-  return 'http://127.0.0.1:8000';
+  // 3. Official Hardcoded Production Cloud Backend (Render)
+  return OFFICIAL_RENDER_BACKEND;
 };
 
 export const BACKEND_URL = getInitialBackendUrl();

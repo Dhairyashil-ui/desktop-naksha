@@ -156,15 +156,15 @@ export const BackendConfigModal: React.FC<BackendConfigModalProps> = ({ isOpen, 
 
               <button
                 type="button"
-                onClick={() => handleSetPreset('https://surveynaksha-backend.onrender.com')}
+                onClick={() => handleSetPreset('https://desktop-naksha.onrender.com')}
                 className={`px-3 py-2 rounded-lg border text-left transition-all ${
-                  urlInput.includes('onrender.com')
+                  urlInput === 'https://desktop-naksha.onrender.com' || urlInput.includes('desktop-naksha')
                     ? 'border-blue-600 bg-blue-600 text-white shadow-sm'
                     : 'border-zinc-200 hover:border-zinc-300 text-zinc-700 bg-white'
                 }`}
               >
                 <div className="text-xs font-bold">Render Cloud</div>
-                <div className="text-[10px] font-mono opacity-70">*.onrender.com</div>
+                <div className="text-[10px] font-mono opacity-70">desktop-naksha.onrender.com</div>
               </button>
             </div>
           </div>

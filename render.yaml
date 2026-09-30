@@ -1,7 +1,7 @@
 services:
   # ── Naksha 2.0 Backend Core Service ─────────────────────────────────────────
   - type: web
-    name: surveynaksha-backend
+    name: desktop-naksha
     runtime: docker
     dockerfilePath: ./Dockerfile
     plan: free
