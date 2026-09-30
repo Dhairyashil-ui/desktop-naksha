@@ -1,5 +1,5 @@
 # ── Naksha 2.0 Backend Dockerfile for Render Cloud & Container Deployments ──
-FROM python:3.11-slim-bookworm
+FROM python:3.12-slim-bookworm
 
 # System dependencies for geospatial, GDAL, and headless 3D processing
 RUN apt-get update && apt-get install -y --no-install-recommends \

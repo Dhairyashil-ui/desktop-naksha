@@ -20,11 +20,11 @@ pypdf>=4.0.0
 python-docx>=1.1.0
 
 # ── Geospatial & Point Cloud Processing Stack ──────────────────────────────
-rasterio>=1.5.1          # GeoTIFF/raster I/O, CRS reprojection, GDAL bindings
-fiona>=1.10.1            # Vector I/O (Shapefile, GeoPackage, GeoJSON)
-geopandas>=1.2.0         # GeoDataFrame, spatial ops, dissolve/overlay/clip
-shapely>=2.1.2           # Geometry (Point, Polygon, intersection, buffer, WKT)
-pyproj>=3.8.0            # CRS transformations, EPSG lookup, datum shifting
-laspy>=2.7.0             # LAS/LAZ 1.0-1.4 point cloud read/write
+rasterio>=1.4.0          # GeoTIFF/raster I/O, CRS reprojection, GDAL bindings
+fiona>=1.9.0             # Vector I/O (Shapefile, GeoPackage, GeoJSON)
+geopandas>=0.14.0        # GeoDataFrame, spatial ops, dissolve/overlay/clip
+shapely>=2.0.0           # Geometry (Point, Polygon, intersection, buffer, WKT)
+pyproj>=3.6.0            # CRS transformations, EPSG lookup, datum shifting
+laspy>=2.5.0             # LAS/LAZ 1.0-1.4 point cloud read/write
 open3d>=0.18.0           # 3D point cloud processing, normals, ICP, visualisation
 numpy>=1.24.0            # Fast numerical arrays for geospatial & 3D matrices
