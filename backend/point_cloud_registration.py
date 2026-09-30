@@ -23,7 +23,12 @@ from pathlib import Path
 from typing import Dict, Any, Tuple, Optional, List
 
 import numpy as np
-import open3d as o3d
+try:
+    import open3d as o3d
+    O3D_AVAILABLE = True
+except Exception:
+    o3d = None
+    O3D_AVAILABLE = False
 import laspy
 
 try:

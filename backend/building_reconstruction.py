@@ -31,12 +31,16 @@ from pathlib import Path
 from typing import Dict, Any, Tuple, Optional, List
 
 import numpy as np
-import open3d as o3d
+try:
+    import open3d as o3d
+    # Silence excessive tetra warnings in Open3D AlphaShape
+    o3d.utility.set_verbosity_level(o3d.utility.VerbosityLevel.Error)
+    O3D_AVAILABLE = True
+except Exception:
+    o3d = None
+    O3D_AVAILABLE = False
 import trimesh
 import laspy
-
-# Silence excessive tetra warnings in Open3D AlphaShape
-o3d.utility.set_verbosity_level(o3d.utility.VerbosityLevel.Error)
 
 
 def evaluate_dataset_characteristics(pcd: o3d.geometry.PointCloud) -> Dict[str, Any]:
