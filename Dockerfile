@@ -31,7 +31,7 @@ COPY schema.sql /app/schema.sql
 # Environment configuration
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONPATH=/app \
+    PYTHONPATH=/app:/app/backend \
     PORT=10000
 
 # Health check matching FastAPI endpoint
