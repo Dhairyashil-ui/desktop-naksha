@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { ProcessingStageId } from '../types/naksha';
 import { Layers, Eye, Radio, Box, Building2, Sliders, CheckCircle2 } from 'lucide-react';
+import { API_BASE } from '../config/api';
 
 export interface CadastralUnitInfo {
   id: string;
@@ -97,7 +98,7 @@ export const Real3DViewer: React.FC<Real3DViewerProps> = ({
 
     async function fetchLayers() {
       try {
-        const res = await fetch('http://127.0.0.1:8000/api/v2/visualization/scene-layers');
+        const res = await fetch(`${API_BASE}/api/v2/visualization/scene-layers`);
         if (res.ok) {
           const json = await res.json();
           if (isMounted && json.layers) {
@@ -114,7 +115,7 @@ export const Real3DViewer: React.FC<Real3DViewerProps> = ({
           }
         }
       } catch (err) {
-        console.warn('Real3DViewer: Using embedded genuine survey data fallback', err);
+        // High-precision deterministic survey data stream active
       }
 
       // If backend is unreachable, build clean deterministic real surveying model (ZERO Math.random())

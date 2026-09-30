@@ -1,0 +1,11 @@
+Unit ID,Unit Number,Floor,Unit Type,Carpet Area (sqm),Built-up Area (sqm),Undivided Share (%),Centroid X,Centroid Y,Centroid Z,Base 2D ULPIN,3D Cadastre ULPIN,Registered Landholder,Title Deed Ref
+UNIT-001,001,0,Administration & Technology Transfer,142.5,168.0,9.2,380138.0,2040194.0,544.5,27-07-005-020401,27-07-005-020401-F00-001,Pimpri Chinchwad Research Trust,REG-MH-PUN-2026-001
+UNIT-002,002,0,Advanced High Performance Computing,185.0,218.0,12.0,380162.0,2040194.0,544.5,27-07-005-020401,27-07-005-020401-F00-002,Pimpri Chinchwad Research Trust,REG-MH-PUN-2026-002
+UNIT-003,003,0,Materials Testing & Characterization,165.2,195.0,10.7,380150.0,2040206.0,544.5,27-07-005-020401,27-07-005-020401-F00-003,Pimpri Chinchwad Research Trust,REG-MH-PUN-2026-003
+UNIT-101,101,1,Precision Metrology & Sensor Lab,158.4,186.0,10.2,380138.0,2040194.0,548.5,27-07-005-020401,27-07-005-020401-F01-101,Pimpri Chinchwad Research Trust,REG-MH-PUN-2026-101
+UNIT-102,102,1,Autonomous Systems & Drone Flight Lab,172.0,202.0,11.1,380162.0,2040194.0,548.5,27-07-005-020401,27-07-005-020401-F01-102,Pimpri Chinchwad Research Trust,REG-MH-PUN-2026-102
+UNIT-103,103,1,Industry Incubation & Startups Hub,145.0,170.0,9.4,380150.0,2040206.0,548.5,27-07-005-020401,27-07-005-020401-F01-103,Pimpri Chinchwad Research Trust,REG-MH-PUN-2026-103
+UNIT-201,201,2,AI & Geospatial Intelligence Wing,168.0,198.0,10.9,380138.0,2040194.0,552.5,27-07-005-020401,27-07-005-020401-F02-201,Pimpri Chinchwad Research Trust,REG-MH-PUN-2026-201
+UNIT-202,202,2,Robotics & Embedded Systems Lab,175.5,206.0,11.4,380162.0,2040194.0,552.5,27-07-005-020401,27-07-005-020401-F02-202,Pimpri Chinchwad Research Trust,REG-MH-PUN-2026-202
+UNIT-301,301,3,Auditorium & Technology Showcase,210.0,248.0,13.6,380140.0,2040200.0,556.5,27-07-005-020401,27-07-005-020401-F03-301,Pimpri Chinchwad Research Trust,REG-MH-PUN-2026-301
+UNIT-302,302,3,Executive Seminar & Council Room,178.4,210.0,11.5,380162.0,2040200.0,556.5,27-07-005-020401,27-07-005-020401-F03-302,Pimpri Chinchwad Research Trust,REG-MH-PUN-2026-302

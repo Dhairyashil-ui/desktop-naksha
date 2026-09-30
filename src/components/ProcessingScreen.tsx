@@ -92,9 +92,7 @@ export const ProcessingScreen: React.FC<ProcessingScreenProps> = ({
             {projectName}
           </span>
           <span className="text-zinc-300">•</span>
-          <span className="font-mono tracking-[0.2em] font-semibold text-zinc-400">
-            NAKSHA 2.0
-          </span>
+          <img src="/logo.png" alt="Logo" className="h-4 max-w-[80px] object-contain inline-block" />
         </div>
       </div>
 

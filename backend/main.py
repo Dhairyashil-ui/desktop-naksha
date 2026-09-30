@@ -702,11 +702,13 @@ def get_db_parcels():
     try:
         with engine.connect() as conn:
             query = text("""
-                SELECT id, ulpin, survey_number, sub_division_number, land_use,
-                       legal_recorded_area_sqm, gis_computed_area_sqm, area_delta_percentage,
-                       ST_AsGeoJSON(geom) as geojson
-                FROM parcels
-                ORDER BY survey_number;
+                SELECT p.id, p.ulpin, p.survey_number, p.sub_division_number, p.land_use,
+                       p.legal_recorded_area_sqm, p.gis_computed_area_sqm, p.area_delta_percentage,
+                       ST_AsGeoJSON(p.geom) as geojson,
+                       p.project_id, pr.code, pr.location, pr.title
+                FROM parcels p
+                LEFT JOIN projects pr ON p.project_id = pr.id
+                ORDER BY p.survey_number;
             """)
             rows = conn.execute(query).fetchall()
             parcels = []
@@ -720,7 +722,11 @@ def get_db_parcels():
                     "legal_area_sqm": float(r[5]) if r[5] else 0.0,
                     "gis_area_sqm": float(r[6]) if r[6] else 0.0,
                     "area_delta_pct": float(r[7]) if r[7] else 0.0,
-                    "geojson": json.loads(r[8]) if r[8] else None
+                    "geojson": json.loads(r[8]) if r[8] else None,
+                    "project_id": str(r[9]) if r[9] else None,
+                    "project_code": str(r[10]) if r[10] else None,
+                    "location": str(r[11]) if r[11] else "Haveli Taluka, Pune, Maharashtra",
+                    "title": str(r[12]) if r[12] else None
                 })
             return {"count": len(parcels), "parcels": parcels}
     except Exception as e:
@@ -782,9 +788,13 @@ def get_db_units():
         with engine.connect() as conn:
             query = text("""
                 SELECT u.id, u.unit_number, u.unit_type, u.carpet_area_sqm, u.built_up_area_sqm,
-                       u.undivided_land_share_pct, f.floor_number, t.owner_name, t.registered_deed_number
+                       u.undivided_land_share_pct, f.floor_number, t.owner_name, t.registered_deed_number,
+                       u.centroid_x, u.centroid_y, u.centroid_z, u.volume_m3, u.base_ulpin, u.display_ulpin_3d,
+                       p.id as parcel_id
                 FROM units u
                 JOIN floors f ON u.floor_id = f.id
+                JOIN buildings b ON f.building_id = b.id
+                JOIN parcels p ON b.parcel_id = p.id
                 LEFT JOIN property_titles t ON t.unit_id = u.id
                 ORDER BY f.floor_number, u.unit_number;
             """)
@@ -800,11 +810,31 @@ def get_db_units():
                     "undivided_share_pct": float(r[5]) if r[5] else None,
                     "floor": r[6],
                     "owner": r[7],
-                    "deed": r[8]
+                    "deed": r[8],
+                    "centroid_x": float(r[9]) if r[9] else None,
+                    "centroid_y": float(r[10]) if r[10] else None,
+                    "centroid_z": float(r[11]) if r[11] else None,
+                    "volume_m3": float(r[12]) if r[12] else None,
+                    "base_ulpin": r[13],
+                    "ulpin3d": r[14],
+                    "parcel_id": str(r[15]) if r[15] else None
                 })
             return {"count": len(units), "units": units}
     except Exception as e:
         return {"count": 0, "error": str(e), "units": []}
+
+@app.post("/api/v2/projects/{project_id}/sample-ppcrc/ingest-channel/{channel_num}")
+def api_ingest_ppcrc_channel(project_id: str, channel_num: int):
+    """
+    Sequentially ingests and validates a single PPCRC category channel (1-10)
+    for the project from d:/surveynaksha/datasets/ppcrc_sample_dataset.
+    """
+    try:
+        from backend.ppcrc_ingestion import ingest_ppcrc_channel
+        res = ingest_ppcrc_channel(project_id, channel_num)
+        return res
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/v2/architecture/status")
 def get_full_architecture_status():

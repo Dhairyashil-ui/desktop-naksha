@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Database, CheckCircle2, RefreshCw } from 'lucide-react';
+import { API_BASE } from '../config/api';
 
 interface ArchitectureModalProps {
   isOpen: boolean;
@@ -12,10 +13,7 @@ export const ArchitectureModal: React.FC<ArchitectureModalProps> = ({ isOpen, on
 
   const fetchStatus = () => {
     setIsLoading(true);
-    const backendUrl = typeof window !== 'undefined' && (window.location.protocol === 'file:' || window.location.protocol.startsWith('tauri'))
-      ? 'http://127.0.0.1:8000'
-      : '';
-    fetch(`${backendUrl}/api/v2/database/health`)
+    fetch(`${API_BASE}/api/v2/database/health`)
       .then(r => r.json())
       .then(health => {
         setDbHealth(health);

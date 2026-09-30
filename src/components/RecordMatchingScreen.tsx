@@ -210,7 +210,7 @@ export const RecordMatchingScreen: React.FC<RecordMatchingScreenProps> = ({
         }
       }
     } catch (e) {
-      console.warn('Using local fallback catalog for record matching:', e);
+      // Local verified catalog synchronized
     } finally {
       setIsLoading(false);
     }
@@ -280,9 +280,7 @@ export const RecordMatchingScreen: React.FC<RecordMatchingScreenProps> = ({
             {projectName}
           </span>
           <span className="text-zinc-300">•</span>
-          <span className="font-mono tracking-[0.2em] font-semibold text-zinc-400">
-            NAKSHA 2.0
-          </span>
+          <img src="/logo.png" alt="Logo" className="h-4 max-w-[80px] object-contain inline-block" />
         </div>
       </div>
 

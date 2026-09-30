@@ -44,6 +44,26 @@ class GeoTransformerRegistration:
     def __init__(self, voxel_size: float = 0.25):
         self.voxel_size = voxel_size
 
+    def register(
+        self,
+        source_pcd: o3d.geometry.PointCloud,
+        target_pcd: o3d.geometry.PointCloud
+    ) -> Tuple[np.ndarray, float]:
+        """
+        Executes full Geometric Transformer registration between source and target clouds:
+        Extracts superpoints, computes geometric invariant embeddings, matches via cross-attention,
+        and computes rigid alignment with SVD Kabsch.
+        Returns: (T_4x4_matrix, confidence)
+        """
+        src_superpts, src_normals = self.extract_superpoints(source_pcd)
+        tgt_superpts, tgt_normals = self.extract_superpoints(target_pcd)
+        src_feats = self.compute_geometric_embeddings(src_superpts, src_normals)
+        tgt_feats = self.compute_geometric_embeddings(tgt_superpts, tgt_normals)
+        T_mat, _, confidence = self.geometric_transformer_match(
+            src_superpts, src_feats, tgt_superpts, tgt_feats
+        )
+        return T_mat, confidence
+
     def extract_superpoints(self, pcd: o3d.geometry.PointCloud) -> Tuple[np.ndarray, np.ndarray]:
         """
         Downsamples point cloud to coarse superpoints and computes geometric surface normals.

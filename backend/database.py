@@ -11,6 +11,7 @@ import socket
 from typing import Generator, Dict, Any, Optional
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
+from sqlalchemy.pool import NullPool
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 
 # Load .env file from project root or current working directory
@@ -57,13 +58,10 @@ def get_database_url() -> str:
 
 DATABASE_URL = get_database_url()
 
-# SQLAlchemy Setup with resilient connection pooling
+# SQLAlchemy Setup with NullPool for Supabase transaction pooler
 engine = create_engine(
     DATABASE_URL,
-    pool_size=10,
-    max_overflow=20,
-    pool_pre_ping=True,
-    pool_recycle=300,
+    poolclass=NullPool,
     connect_args={
         "connect_timeout": 10,
         "application_name": "Naksha2_FastAPI_Core"

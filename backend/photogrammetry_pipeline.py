@@ -85,14 +85,24 @@ def extract_features(
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             t_img = t_img.to(device)
 
-            aliked = kf.ALIKED(model_name="aliked-n16", top_k=max_num_keypoints).to(device)
+            aliked = kf.ALIKED(model_name="aliked-n16", max_num_keypoints=max_num_keypoints).to(device)
             aliked.eval()
 
             with torch.no_grad():
                 res = aliked(t_img)
-                kpts = res["keypoints"][0].cpu().numpy() / scale
-                desc = res["descriptors"][0].cpu().numpy()
-                scores = res["keypoint_scores"][0].cpu().numpy()
+                if isinstance(res, (list, tuple)) and len(res) > 0:
+                    feat_obj = res[0]
+                    kpts = (feat_obj.keypoints.cpu().numpy() / scale) if hasattr(feat_obj, 'keypoints') else (res[0]["keypoints"].cpu().numpy() / scale)
+                    desc = feat_obj.descriptors.cpu().numpy() if hasattr(feat_obj, 'descriptors') else res[0]["descriptors"].cpu().numpy()
+                    scores = feat_obj.keypoint_scores.cpu().numpy() if hasattr(feat_obj, 'keypoint_scores') else res[0]["keypoint_scores"].cpu().numpy()
+                elif isinstance(res, dict):
+                    kpts = res["keypoints"][0].cpu().numpy() / scale
+                    desc = res["descriptors"][0].cpu().numpy()
+                    scores = res["keypoint_scores"][0].cpu().numpy()
+                else:
+                    kpts = getattr(res, "keypoints").cpu().numpy() / scale
+                    desc = getattr(res, "descriptors").cpu().numpy()
+                    scores = getattr(res, "keypoint_scores").cpu().numpy()
 
             return {
                 "keypoints": kpts.astype(np.float32),

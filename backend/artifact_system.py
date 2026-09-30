@@ -208,6 +208,11 @@ def get_artifact(artifact_id: str, db_engine = None) -> Optional[ArtifactRecord]
 
 def list_job_artifacts(job_id: str, db_engine = None) -> List[ArtifactRecord]:
     """Retrieves all artifacts produced in a given job."""
+    try:
+        uuid.UUID(str(job_id))
+    except (ValueError, AttributeError):
+        return []
+
     conn_engine = db_engine or engine
     with conn_engine.connect() as conn:
         rows = conn.execute(

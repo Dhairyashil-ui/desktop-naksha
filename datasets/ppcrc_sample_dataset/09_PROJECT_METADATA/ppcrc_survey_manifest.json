@@ -1,0 +1,58 @@
+{
+  "naksha_schema_version": "2.0.0",
+  "standard_compliance": [
+    "ISO 19152:2012 LADM",
+    "Survey of India Cadastral Manual",
+    "OGC CityGML 3.0"
+  ],
+  "project_metadata": {
+    "project_id": "c0000000-0000-0000-0000-000000000204",
+    "project_code": "PROJ-PPCRC-001",
+    "project_name": "PPCRC Research Centre Cadastral & 3D Demarcation",
+    "survey_authority": "Maharashtra State Department of Land Records (MLRC)",
+    "district": "Pune",
+    "taluka": "Haveli",
+    "village": "Nigdi",
+    "cadastral_survey_no": "204",
+    "sub_division": "1",
+    "base_ulpin": "27-07-005-020401",
+    "survey_date": "2026-09-02",
+    "lead_surveyor": "Chief Cadastral Surveyor (Govt. Licensed)",
+    "survey_equipment": [
+      {
+        "type": "GNSS RTK Base & Rover",
+        "model": "Trimble R12i",
+        "horizontal_accuracy_m": 0.008,
+        "vertical_accuracy_m": 0.015
+      },
+      {
+        "type": "Aerial Drone",
+        "model": "DJI Matrice 300 RTK",
+        "camera": "Zenmuse P1 Full Frame 35mm"
+      },
+      {
+        "type": "Aerial LiDAR",
+        "model": "Zenmuse L1",
+        "ranging_accuracy_m": 0.02
+      }
+    ]
+  },
+  "spatial_reference_system": {
+    "epsg_code": 32643,
+    "crs_name": "WGS 84 / UTM zone 43N",
+    "projection": "Transverse Mercator",
+    "ellipsoid": "WGS 84",
+    "central_meridian": 75.0,
+    "combined_scale_factor": 0.9996024,
+    "vertical_datum": "EGM2008 Geoid (MSL)"
+  },
+  "cadastral_metrics": {
+    "legal_recorded_area_sqm": 4500.0,
+    "gis_computed_area_sqm": 4500.0,
+    "building_count": 1,
+    "floors_above_ground": 4,
+    "strata_units_count": 10,
+    "horizontal_tolerance_cm": 2.5,
+    "vertical_tolerance_cm": 3.0
+  }
+}

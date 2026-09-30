@@ -1,0 +1,21 @@
+services:
+  # ── Naksha 2.0 Backend Core Service ─────────────────────────────────────────
+  - type: web
+    name: surveynaksha-backend
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    region: oregon
+    autoDeploy: true
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: CORS_ORIGINS
+        value: "*"
+      - key: APP_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false

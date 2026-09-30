@@ -580,6 +580,11 @@ def get_job_full_status(job_id: str, db_engine=None) -> Optional[Dict[str, Any]]
     Queries complete job state from PostgreSQL:
     Job -> Nodes -> Artifacts.
     """
+    try:
+        uuid.UUID(str(job_id))
+    except (ValueError, AttributeError):
+        return None
+
     conn_engine = db_engine or engine
     with conn_engine.connect() as conn:
         job_row = conn.execute(

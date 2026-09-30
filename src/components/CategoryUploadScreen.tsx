@@ -176,7 +176,7 @@ export const CategoryUploadScreen: React.FC<CategoryUploadScreenProps> = ({
           <ArrowLeft className="w-3.5 h-3.5" />
           <span>DATA INPUTS</span>
         </button>
-        <span className="font-mono tracking-[0.2em] font-semibold text-zinc-400">NAKSHA 2.0</span>
+        <img src="/logo.png" alt="Logo" className="h-4 max-w-[80px] object-contain inline-block" />
       </div>
 
       {/* Main */}

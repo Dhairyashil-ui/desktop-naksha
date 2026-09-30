@@ -88,13 +88,10 @@ class LocalSpatialEncoding:
         N, K, _ = neighbor_pts.shape
         rel_diff = neighbor_pts - center_pts[:, None, :] # (N, K, 3)
         rel_dist = np.linalg.norm(rel_diff, axis=-1, keepdims=True) # (N, K, 1)
-        expanded_center = np.repeat(center_pts[:, None, :], K, axis=1) # (N, K, 3)
+        expanded_center = np.broadcast_to(center_pts[:, None, :], (N, K, 3)) # Zero copy
 
-        # Concatenate 10 geometric dimensions
-        geo_enc = np.concatenate([expanded_center, neighbor_pts, rel_diff, rel_dist], axis=-1) # (N, K, 10)
-
-        # Concatenate with neighbor feature
-        combined = np.concatenate([geo_enc, neighbor_feats], axis=-1) # (N, K, 10 + C)
+        # Concatenate 10 geometric dimensions + neighbor features
+        combined = np.concatenate([expanded_center, neighbor_pts, rel_diff, rel_dist, neighbor_feats], axis=-1)
 
         # Linear projection + LeakyReLU
         out = np.matmul(combined, self.w) + self.b

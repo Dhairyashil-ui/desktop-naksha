@@ -1,0 +1,56 @@
+name: Build and Release Desktop App
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  release:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [windows-latest]
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Frontend Dependencies
+        run: npm ci
+
+      - name: Build Tauri Desktop Bundle
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: v__VERSION__
+          releaseName: 'Naksha 2.0 Desktop v__VERSION__'
+          releaseBody: |
+            ## Naksha 2.0 Land Survey & Cadastral Intelligence Desktop Shell
+            
+            ### Included in this release:
+            - Official Naksha 2.0 Windows Installer (`.msi`)
+            - Standalone Portable Executable (`.exe`)
+            - Integrated Python Fast-API supervisor
+            - Full 10 PPCRC ingestion channels & 7-stage 3D reconstruction
+            
+            ### Installation Instructions:
+            1. Download the `.msi` installer below and run it.
+            2. Follow the on-screen instructions to install.
+            3. Run Naksha 2.0 directly from the Start Menu or Desktop shortcut!
+          releaseDraft: false
+          prerelease: false

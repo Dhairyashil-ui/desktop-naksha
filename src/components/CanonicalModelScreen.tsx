@@ -24,6 +24,7 @@ import {
   CanonicalProject,
   CadastralUnit
 } from '../types/canonical';
+import { API_BASE } from '../config/api';
 
 interface CanonicalModelScreenProps {
   onBack: () => void;
@@ -52,7 +53,7 @@ export const CanonicalModelScreen: React.FC<CanonicalModelScreenProps> = ({
   const fetchCanonical = async () => {
     setIsLoading(true);
     try {
-      const res = await fetch('http://localhost:8000/api/v2/canonical/project/PROJ-PUNE-001');
+      const res = await fetch(`${API_BASE}/api/v2/canonical/project/PROJ-PUNE-001`);
       if (res.ok) {
         const data: CanonicalProject = await res.json();
         setProjectData(data);
@@ -253,10 +254,7 @@ export const CanonicalModelScreen: React.FC<CanonicalModelScreenProps> = ({
             <CheckCircle2 className="w-3.5 h-3.5" />
             <span>ISO 19152 LADM COMPLIANT</span>
           </span>
-          <span className="text-zinc-300">•</span>
-          <span className="font-mono tracking-[0.2em] font-semibold text-zinc-400">
-            NAKSHA 2.0
-          </span>
+          <img src="/logo.png" alt="Logo" className="h-4 max-w-[80px] object-contain inline-block" />
         </div>
       </div>
 

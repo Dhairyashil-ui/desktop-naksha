@@ -1,0 +1,17 @@
+# PPCRC Cadastral Photogrammetry Camera Calibration
+# Sensor: Zenmuse P1 Full-Frame 45MP (35.9 x 24.0 mm)
+parameter,value,unit
+camera_model,Zenmuse_P1_35mm,model
+sensor_width_mm,35.9,mm
+sensor_height_mm,24.0,mm
+image_width_px,8192,px
+image_height_px,5460,px
+focal_length_mm,35.148,mm
+focal_length_px,8015.42,px
+principal_point_x_px,4096.25,px
+principal_point_y_px,2730.12,px
+radial_k1,-0.001242,dimensionless
+radial_k2,0.000418,dimensionless
+radial_k3,-0.000021,dimensionless
+tangential_p1,0.000084,dimensionless
+tangential_p2,-0.000052,dimensionless

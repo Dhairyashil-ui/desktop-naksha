@@ -1,0 +1,98 @@
+{
+  "type": "FeatureCollection",
+  "name": "PPCRC_Cadastral_Parcel_204_1",
+  "crs": {
+    "type": "name",
+    "properties": {
+      "name": "urn:ogc:def:crs:EPSG::32643"
+    }
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 1,
+        "survey_number": "204",
+        "sub_division": "1",
+        "ulpin": "27-07-005-020401",
+        "state": "Maharashtra",
+        "district": "Pune",
+        "taluka": "Haveli",
+        "village": "Nigdi",
+        "location": "Pimpri Chinchwad Research Centre, Sector 26, Nigdi",
+        "land_use": "COMMERCIAL_INSTITUTIONAL",
+        "legal_area_sqm": 4500.0,
+        "gis_area_sqm": 4500.0,
+        "owner": "Pimpri Chinchwad Research & Education Trust",
+        "status": "APPROVED_SURVEY"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              380112.5,
+              2040170.0
+            ],
+            [
+              380187.5,
+              2040170.0
+            ],
+            [
+              380187.5,
+              2040230.0
+            ],
+            [
+              380112.5,
+              2040230.0
+            ],
+            [
+              380112.5,
+              2040170.0
+            ]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 2,
+        "feature_type": "BUILDING_FOOTPRINT",
+        "building_code": "PPCRC-MAIN",
+        "building_name": "Pimpri Chinchwad Research Centre",
+        "floors": 4,
+        "height_m": 16.0,
+        "footprint_area_sqm": 1248.0,
+        "ground_z": 542.5
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              380126.0,
+              2040187.0
+            ],
+            [
+              380174.0,
+              2040187.0
+            ],
+            [
+              380174.0,
+              2040213.0
+            ],
+            [
+              380126.0,
+              2040213.0
+            ],
+            [
+              380126.0,
+              2040187.0
+            ]
+          ]
+        ]
+      }
+    }
+  ]
+}

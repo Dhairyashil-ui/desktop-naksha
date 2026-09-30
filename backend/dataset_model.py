@@ -380,13 +380,13 @@ def get_or_create_project_dataset(
         return new_id
 
 
-def sync_dataset_metrics(dataset_id: str) -> Optional[DatasetModel]:
+def sync_dataset_metrics(dataset_id: str, conn=None) -> Optional[DatasetModel]:
     """
     Recalculates completeness, quality, status, validation_status, and file count
     across all files grouped under the dataset, and persists to PostgreSQL.
     """
-    with engine.connect() as conn:
-        ds_row = conn.execute(text("""
+    def _execute(connection):
+        ds_row = connection.execute(text("""
             SELECT id, project_id, category, name, created_at, updated_at
             FROM input_datasets
             WHERE id = :id;
@@ -401,7 +401,7 @@ def sync_dataset_metrics(dataset_id: str) -> Optional[DatasetModel]:
         created_at_str = str(ds_row[4])
 
         # Query all child files
-        files_rows = conn.execute(text("""
+        files_rows = connection.execute(text("""
             SELECT id, file_name, extension, file_role, mime_type,
                    size_bytes, sha256, relative_path, is_corrupt, created_at
             FROM dataset_files
@@ -455,7 +455,7 @@ def sync_dataset_metrics(dataset_id: str) -> Optional[DatasetModel]:
         }
 
         # Update input_datasets record with real scores
-        conn.execute(text("""
+        connection.execute(text("""
             UPDATE input_datasets
             SET file_count = :file_count,
                 total_size_bytes = :total_size,
@@ -477,7 +477,6 @@ def sync_dataset_metrics(dataset_id: str) -> Optional[DatasetModel]:
             "manifest": json.dumps(manifest_data),
             "now": now,
         })
-        conn.commit()
 
         return DatasetModel(
             dataset_id=dataset_id,
@@ -495,6 +494,14 @@ def sync_dataset_metrics(dataset_id: str) -> Optional[DatasetModel]:
             created_at=created_at_str,
             updated_at=str(now),
         )
+
+    if conn is not None:
+        return _execute(conn)
+    else:
+        with engine.connect() as local_conn:
+            res = _execute(local_conn)
+            local_conn.commit()
+            return res
 
 
 def get_dataset_model(dataset_id: str) -> Optional[DatasetModel]:
@@ -515,9 +522,10 @@ def list_project_datasets_grouped(project_id: str) -> List[DatasetModel]:
             ORDER BY created_at ASC;
         """), {"project_id": project_id}).fetchall()
 
-    datasets: List[DatasetModel] = []
-    for r in rows:
-        ds = sync_dataset_metrics(str(r[0]))
-        if ds:
-            datasets.append(ds)
+        datasets: List[DatasetModel] = []
+        for r in rows:
+            ds = sync_dataset_metrics(str(r[0]), conn=conn)
+            if ds:
+                datasets.append(ds)
+        conn.commit()
     return datasets

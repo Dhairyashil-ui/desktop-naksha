@@ -1,6 +1,8 @@
 node_modules/
 dist/
+dist-desktop/
 target/
+src-tauri/target/
 .env
 .env.*
 __pycache__/

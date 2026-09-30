@@ -199,7 +199,11 @@ export const DatasetScannerScreen: React.FC<DatasetScannerScreenProps> = ({
           <ArrowLeft className="w-3.5 h-3.5" />
           <span>Back to Inputs</span>
         </button>
-        <span className="font-mono tracking-[0.2em] font-semibold text-zinc-400">NAKSHA 2.0 • SCANNER</span>
+        <div className="flex items-center space-x-2">
+          <img src="/logo.png" alt="Logo" className="h-4 max-w-[80px] object-contain inline-block" />
+          <span className="text-zinc-300">•</span>
+          <span className="font-mono text-[11px] text-zinc-400">SCANNER</span>
+        </div>
       </div>
 
       {/* Main Container */}

@@ -38,13 +38,17 @@ export const Header: React.FC<HeaderProps> = ({
       {/* Brand & Project Identity */}
       <div className="flex items-center space-x-6">
         <div className="flex items-center space-x-2">
-          <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center font-bold text-white shadow-lg shadow-blue-500/20">
-            N2
-          </div>
+          <img 
+            src="/logo.png" 
+            alt="Naksha 2.0 Logo" 
+            className="h-8 max-w-[120px] object-contain rounded" 
+            onError={(e) => {
+              (e.target as HTMLElement).style.display = 'none';
+            }}
+          />
           <div>
-            <div className="text-sm font-bold tracking-wider text-white flex items-center gap-2">
-              NAKSHA 2.0
-              <span className="text-[10px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded font-mono font-medium">DESKTOP</span>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded font-mono font-medium border border-blue-500/30">DESKTOP</span>
             </div>
             <div className="text-[10px] text-slate-400 font-mono">Land Cadastre & Geospatial Intelligence</div>
           </div>

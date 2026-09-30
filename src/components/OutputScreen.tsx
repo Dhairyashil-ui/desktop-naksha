@@ -75,8 +75,10 @@ export const OutputScreen: React.FC<OutputScreenProps> = ({ onBack }) => {
         ) : (
           <div />
         )}
-        <div className="font-mono text-[11px] text-zinc-400">
-          NAKSHA 2.0 • OUTPUT GENERATION
+        <div className="flex items-center space-x-2">
+          <img src="/logo.png" alt="Logo" className="h-4 max-w-[80px] object-contain inline-block" />
+          <span className="text-zinc-300">•</span>
+          <span className="font-mono text-[11px] text-zinc-400">OUTPUT GENERATION</span>
         </div>
       </div>
 

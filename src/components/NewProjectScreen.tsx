@@ -32,9 +32,7 @@ export const NewProjectScreen: React.FC<NewProjectScreenProps> = ({ onCreateProj
     <div className="min-h-screen w-full bg-white text-zinc-900 flex flex-col justify-between items-center py-16 px-6 font-sans">
       {/* Brand Header */}
       <div className="w-full max-w-sm text-center">
-        <div className="text-xs font-mono font-semibold tracking-[0.25em] text-zinc-400 uppercase">
-          NAKSHA 2.0
-        </div>
+        <img src="/logo.png" alt="Logo" className="h-9 mx-auto object-contain" />
       </div>
 
       {/* Main Minimalist Form */}

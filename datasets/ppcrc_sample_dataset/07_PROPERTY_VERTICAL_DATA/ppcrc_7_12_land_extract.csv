@@ -1,0 +1,11 @@
+# MAHARASHTRA LAND REVENUE CODE — FORM VII-XII EXTRACT
+state,district,taluka,village,survey_number,sub_division,total_area_hectare,assessment_inr,tenure_class
+Maharashtra,Pune,Haveli,Nigdi,204,1,0.4500,1250.00,Occupant_Class_I
+
+# SECTION 12 — REGISTERED LANDHOLDERS
+holder_id,holder_name,khata_number,share_fraction,entry_date
+KH-8924,Pimpri Chinchwad Research & Education Trust,4102,1/1,2018-03-15
+
+# SECTION 12 — MUTATIONS & ENCUMBRANCES
+mutation_no,mutation_type,status,sanction_authority,date
+4102,Non-Agricultural Commercial Sanction,CERTIFIED,Sub-Divisional Officer Pune,2019-11-20
