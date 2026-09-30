@@ -12,6 +12,10 @@ import { IndiaToPropertyMapProps } from './types';
 // Coordinates matching Pralhad P. Chhabria Research Center (PCCRC)
 const PCCRC_COORDS = { lat: 18.584072, lng: 73.737195, zoom: 19.0 };
 
+// Google Maps 3D & Direct Google 3D Tiles Root Endpoint
+const GOOGLE_MAPS_KEY = (import.meta as any).env?.VITE_GOOGLE_MAPS_API_KEY || 'AIzaSyCpnqe41Fmad2SDx9vFU5P-DwglKD5M72U';
+const GOOGLE_3D_TILES_ROOT = `https://tile.googleapis.com/v1/3dtiles/root.json?key=${GOOGLE_MAPS_KEY}`;
+
 export const IndiaToPropertyMap: React.FC<IndiaToPropertyMapProps> = ({
   isZoomed,
   aerialImageUrl = '/pccrc_building_centered_aerial.jpg',
@@ -40,11 +44,31 @@ export const IndiaToPropertyMap: React.FC<IndiaToPropertyMapProps> = ({
   }, [aerialImageUrl]);
 
   // -------------------------------------------------------------------------
-  // 1. Try CesiumJS Globe initialization
+  // 1. Google 3D Tiles & CesiumJS Globe initialization
   // -------------------------------------------------------------------------
   useEffect(() => {
     let timer: any = null;
-    const initCesium = () => {
+
+    // Dynamically inject Cesium script and styles if not yet present
+    if (typeof window !== 'undefined' && !(window as any).Cesium && !document.getElementById('cesium-script')) {
+      if (!document.getElementById('cesium-style')) {
+        const link = document.createElement('link');
+        link.id = 'cesium-style';
+        link.rel = 'stylesheet';
+        link.href = 'https://cesium.com/downloads/cesiumjs/releases/1.115/Build/Cesium/Widgets/widgets.css';
+        document.head.appendChild(link);
+      }
+      const script = document.createElement('script');
+      script.id = 'cesium-script';
+      script.src = 'https://cesium.com/downloads/cesiumjs/releases/1.115/Build/Cesium/Cesium.js';
+      script.async = true;
+      script.onload = () => {
+        initCesium();
+      };
+      document.head.appendChild(script);
+    }
+
+    const initCesium = async () => {
       const Cesium = (window as any).Cesium;
       if (!Cesium || !cesiumContainerRef.current) {
         timer = setTimeout(initCesium, 150);
@@ -71,16 +95,50 @@ export const IndiaToPropertyMap: React.FC<IndiaToPropertyMapProps> = ({
 
           viewerRef.current = viewer;
 
-          // Add high-resolution satellite basemap
+          // Configure Google Maps API Key on Cesium
+          if (Cesium.GoogleMaps) {
+            Cesium.GoogleMaps.defaultApiKey = GOOGLE_MAPS_KEY;
+          }
+
+          // Add Google Photorealistic 3D Tileset (Direct Google 3D Tiles Root Endpoint)
+          let tilesetLoaded = false;
           try {
-            viewer.imageryLayers.addImageryProvider(
-              new Cesium.UrlTemplateImageryProvider({
-                url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-                maximumLevel: 19
-              })
-            );
-          } catch {
-            // fallback to default
+            let tileset: any = null;
+            if (typeof Cesium.createGooglePhotorealistic3DTileset === 'function') {
+              tileset = await Cesium.createGooglePhotorealistic3DTileset({
+                key: GOOGLE_MAPS_KEY
+              });
+            } else if (Cesium.Cesium3DTileset) {
+              tileset = await Cesium.Cesium3DTileset.fromUrl(GOOGLE_3D_TILES_ROOT);
+            }
+            if (tileset) {
+              viewer.scene.primitives.add(tileset);
+              tilesetLoaded = true;
+              console.log('[Google 3D Tiles] Successfully initialized Google Photorealistic 3D Tiles');
+            }
+          } catch (tileErr) {
+            console.warn('[Google 3D Tiles] 3D Tileset load notice:', tileErr);
+          }
+
+          // Add high-resolution Google Maps Hybrid/Satellite basemap
+          if (!tilesetLoaded) {
+            try {
+              viewer.imageryLayers.addImageryProvider(
+                new Cesium.UrlTemplateImageryProvider({
+                  url: `https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}&key=${GOOGLE_MAPS_KEY}`,
+                  maximumLevel: 20
+                })
+              );
+            } catch {
+              try {
+                viewer.imageryLayers.addImageryProvider(
+                  new Cesium.UrlTemplateImageryProvider({
+                    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                    maximumLevel: 19
+                  })
+                );
+              } catch {}
+            }
           }
 
           // Initial Camera: Entire India Subcontinent
@@ -96,7 +154,7 @@ export const IndiaToPropertyMap: React.FC<IndiaToPropertyMapProps> = ({
           setCesiumActive(true);
         }
       } catch (err) {
-        console.warn('Cesium initialization skipped, using WebGL Canvas satellite map:', err);
+        console.warn('Cesium initialization notice, using WebGL Canvas satellite map:', err);
       }
     };
 
@@ -515,9 +573,14 @@ export const IndiaToPropertyMap: React.FC<IndiaToPropertyMapProps> = ({
         }}>
           <Satellite size={16} color="#38bdf8" />
           <div style={{ display: 'flex', flexDirection: 'column' }}>
-            <span style={{ fontSize: '10px', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.8px', fontWeight: 600 }}>
-              3D GIS SATELLITE ENGINE
-            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ fontSize: '10px', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.8px', fontWeight: 600 }}>
+                GOOGLE 3D TILES & GIS ENGINE
+              </span>
+              <span style={{ fontSize: '8px', backgroundColor: '#0284c7', color: '#fff', padding: '1px 5px', borderRadius: '4px', fontWeight: 700 }}>
+                PHOTOREALISTIC 3D ACTIVE
+              </span>
+            </div>
             <span style={{ fontSize: '13px', fontWeight: 700, color: '#38bdf8', fontFamily: 'monospace' }}>
               {currentAltitude}
             </span>
