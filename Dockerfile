@@ -13,6 +13,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libglib2.0-0 \
     libgomp1 \
     libx11-6 \
+    libxext6 \
+    libxrender1 \
     libspatialindex-dev \
     && rm -rf /var/lib/apt/lists/*
 
@@ -34,6 +36,7 @@ COPY schema.sql /app/schema.sql
 # Environment configuration
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
+    OPEN3D_CPU_RENDERING=true \
     PYTHONPATH=/app:/app/backend \
     PORT=10000
 

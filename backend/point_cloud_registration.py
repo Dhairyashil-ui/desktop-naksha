@@ -15,20 +15,42 @@ Common XYZ coordinate system (UTM EPSG Georeferenced)
 Fused Point Cloud (fused_point_cloud.las)
 """
 
+from __future__ import annotations
+
 import os
 import sys
 import uuid
 import time
+import logging
 from pathlib import Path
 from typing import Dict, Any, Tuple, Optional, List
+
+logger = logging.getLogger(__name__)
 
 import numpy as np
 try:
     import open3d as o3d
     O3D_AVAILABLE = True
-except Exception:
-    o3d = None
+except Exception as _o3d_err:
+    logger.warning("Open3D initialization notice: %s (falling back to CPU geometry)", _o3d_err)
     O3D_AVAILABLE = False
+    class _DummyGeometry:
+        PointCloud = Any
+        TriangleMesh = Any
+    class _DummyUtility:
+        class VerbosityLevel:
+            Error = 0
+            Warning = 1
+            Info = 2
+            Debug = 3
+        @staticmethod
+        def set_verbosity_level(*args, **kwargs):
+            pass
+    class _DummyOpen3D:
+        geometry = _DummyGeometry
+        utility = _DummyUtility
+    o3d = _DummyOpen3D
+
 import laspy
 
 try:

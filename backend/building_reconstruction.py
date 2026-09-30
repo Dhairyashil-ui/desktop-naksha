@@ -37,8 +37,23 @@ try:
     o3d.utility.set_verbosity_level(o3d.utility.VerbosityLevel.Error)
     O3D_AVAILABLE = True
 except Exception:
-    o3d = None
     O3D_AVAILABLE = False
+    class _DummyGeometry:
+        PointCloud = Any
+        TriangleMesh = Any
+    class _DummyUtility:
+        class VerbosityLevel:
+            Error = 0
+            Warning = 1
+            Info = 2
+            Debug = 3
+        @staticmethod
+        def set_verbosity_level(*args, **kwargs):
+            pass
+    class _DummyOpen3D:
+        geometry = _DummyGeometry
+        utility = _DummyUtility
+    o3d = _DummyOpen3D
 import trimesh
 import laspy
 
